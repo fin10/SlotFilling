@@ -1,8 +1,8 @@
-import os
 import random
 import re
 
 import numpy as np
+import os
 import tensorflow as tf
 from tensorflow.contrib.learn.python.learn.estimators.dynamic_rnn_estimator import multi_value_rnn_classifier, RNNKeys
 from tensorflow.contrib.learn.python.learn.preprocessing import VocabularyProcessor
@@ -18,6 +18,7 @@ class SlotFillingModel:
     BATCH_SIZE = 64
     STEP_SIZE = 1000
     MAX_SENTENCE_LENGTH = 100
+
     DOMAIN_REGEX = re.compile('\[([^\]]+)\] (.+)')
     IOB_REGEX = re.compile('\(([^)]+)\)\[([\w]+)\]')
 
@@ -37,7 +38,8 @@ class SlotFillingModel:
                 self.__word_processor.fit(list(vocab.keys()))
                 self.__word_processor.save('./word_processor.saved')
 
-        seq_feature_columns = [tf.contrib.layers.real_valued_column('inputs')]
+        seq_feature_columns = [
+            tf.contrib.layers.real_valued_column('inputs', dimension=SlotFillingModel.MAX_SENTENCE_LENGTH)]
         self.__classifier = multi_value_rnn_classifier(num_classes=len(self.__slot_processor.vocabulary_),
                                                        num_units=SlotFillingModel.MAX_SENTENCE_LENGTH,
                                                        sequence_feature_columns=seq_feature_columns,
@@ -103,15 +105,14 @@ class SlotFillingModel:
         return input_dict, labels
 
     def train(self, train_data, dev_data):
-        dev_dataset = self.load_data(dev_data)
-        validation_monitor = tf.contrib.learn.monitors.ValidationMonitor(
-            input_fn=lambda: self.input_fn(dev_dataset, dev_dataset['size']),
-            every_n_steps=100)
-
         self.__classifier.fit(
             input_fn=lambda: self.input_fn(self.load_data(train_data), SlotFillingModel.BATCH_SIZE),
-            # monitors=[validation_monitor],
             steps=SlotFillingModel.STEP_SIZE)
+
+        accuracy_score = self.__classifier.evaluate(
+            input_fn=lambda: self.input_fn(self.load_data(dev_data), len(dev_data)),
+            steps=1)['accuracy']
+        print("Accuracy: {0:f}".format(accuracy_score))
 
     def test(self, test_data):
         dataset = self.load_data(test_data)
