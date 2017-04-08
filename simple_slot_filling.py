@@ -7,10 +7,10 @@ import tensorflow as tf
 
 tf.logging.set_verbosity(tf.logging.INFO)
 EMBEDDING_DIMENSION = 128
-MAX_SENTENCE_LENGTH = 50
+MAX_SENTENCE_LENGTH = 100
 CELL_SIZE = 128
-BATCH_SIZE = 300
-NUM_LAYERS = 3
+BATCH_SIZE = 64
+NUM_LAYERS = 1
 UNK = '<unk>'
 
 
@@ -63,6 +63,9 @@ def load_dataset(data_path: str, size: int = -1):
                     words.append(token)
                     tags.append('o')
 
+            if len(words) > MAX_SENTENCE_LENGTH:
+                raise OverflowError('size:%d, %s' % (len(words), line))
+
             data.append(words)
             target.append(tags)
 
@@ -78,22 +81,15 @@ def load_dataset(data_path: str, size: int = -1):
     }
 
 
-def input_fn(slot_vocab: dict, word_vocab: dict, dataset: dict, size: int = BATCH_SIZE):
-    input_dict = {
-        'labeled_inputs': [],
-        'labeled_sequence_length': [],
-        'mask': []
-    }
+def parse_data(slot_vocab: dict, word_vocab: dict, data, target):
+    inputs = []
+    lengths = []
+    masks = []
     labels = []
 
-    if size == dataset['size']:
-        indices = [x for x in range(dataset['size'])]
-    else:
-        indices = random.sample([x for x in range(dataset['size'])], size)
-
-    for i in indices:
-        words = copy.deepcopy(dataset['data'][i])
-        tags = copy.deepcopy(dataset['target'][i])
+    for d, t in zip(data, target):
+        words = copy.deepcopy(d)
+        tags = copy.deepcopy(t)
         if len(words) is not len(tags):
             raise ValueError('length is not same. ({})'.format(words))
         if len(words) > MAX_SENTENCE_LENGTH:
@@ -121,21 +117,69 @@ def input_fn(slot_vocab: dict, word_vocab: dict, dataset: dict, size: int = BATC
             else:
                 words[j] = word_vocab[words[j]]
 
-        input_dict['labeled_inputs'].append(words)
-        input_dict['labeled_sequence_length'].append(length)
-        input_dict['mask'].append(mask)
+        inputs.append(words)
+        lengths.append(length)
+        masks.append(mask)
         labels.append(tags)
 
-    with open('./label.tmp', 'w') as f:
-        for label in labels:
-            f.write('{}\n'.format(label))
+    return {
+        'inputs': inputs,
+        'lengths': lengths,
+        'masks': masks,
+        'labels': labels
+    }
 
-    input_dict['labeled_inputs'] = tf.constant(np.array(input_dict['labeled_inputs']))
-    input_dict['labeled_sequence_length'] = tf.constant(input_dict['labeled_sequence_length'])
-    input_dict['mask'] = tf.constant(input_dict['mask'])
-    labels = tf.constant(labels)
+
+def input_fn(slot_vocab: dict, word_vocab: dict, dataset: dict, unlabeled_dataset: dict = None, size: int = BATCH_SIZE):
+    input_dict = {
+    }
+
+    # unlabeled data
+    if unlabeled_dataset is not None:
+        indices = random.sample([x for x in range(unlabeled_dataset['size'])], size)
+        result = parse_data(
+            slot_vocab=slot_vocab,
+            word_vocab=word_vocab,
+            data=[unlabeled_dataset['data'][idx] for idx in indices],
+            target=[unlabeled_dataset['target'][idx] for idx in indices]
+        )
+
+        input_dict['unlabeled_inputs'] = tf.constant(np.array(result['inputs']))
+        input_dict['unlabeled_sequence_length'] = tf.constant(result['lengths'])
+        input_dict['unlabeled_mask'] = tf.constant(result['masks'])
+    else:
+        input_dict['unlabeled_inputs'] = tf.zeros([1, MAX_SENTENCE_LENGTH, EMBEDDING_DIMENSION], dtype=tf.float32)
+        input_dict['unlabeled_sequence_length'] = tf.zeros([1], dtype=tf.int32)
+        input_dict['unlabeled_mask'] = tf.zeros([1, MAX_SENTENCE_LENGTH], dtype=tf.float32)
+
+    # labeled data
+    if size == dataset['size']:
+        indices = [x for x in range(dataset['size'])]
+    else:
+        indices = random.sample([x for x in range(dataset['size'])], size)
+
+    result = parse_data(
+        slot_vocab=slot_vocab,
+        word_vocab=word_vocab,
+        data=[dataset['data'][idx] for idx in indices],
+        target=[dataset['target'][idx] for idx in indices]
+    )
+
+    input_dict['labeled_inputs'] = tf.constant(np.array(result['inputs']))
+    input_dict['labeled_sequence_length'] = tf.constant(result['lengths'])
+    input_dict['labeled_mask'] = tf.constant(result['masks'])
+    labels = tf.constant(result['labels'])
 
     return input_dict, labels
+
+
+def coefficient_balancing(T1, T2, af, t):
+    if tf.less(t, T1) is not None:
+        return 0
+    elif tf.less_equal(T2, t) is not None:
+        return af
+
+    return (af * (t - T1)) / (T2 - T1)
 
 
 def rnn_model_fn(features, target, mode, params):
@@ -147,9 +191,22 @@ def rnn_model_fn(features, target, mode, params):
     cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
     cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
 
-    inputs = features['labeled_inputs']
-    length = features['labeled_sequence_length']
-    mask = features['mask']
+    # labeled data
+    labeled_inputs = features['labeled_inputs']
+    labeled_length = features['labeled_sequence_length']
+    labeled_mask = features['labeled_mask']
+
+    # unlabeled data
+    unlabeled_inputs = features['unlabeled_inputs']
+    unlabeled_length = features['unlabeled_sequence_length']
+    unlabeled_mask = features['unlabeled_mask']
+
+    if mode == tf.contrib.learn.ModeKeys.TRAIN:
+        inputs = tf.concat([labeled_inputs, unlabeled_inputs], 0)
+        length = tf.concat([labeled_length, unlabeled_length], 0)
+    else:
+        inputs = labeled_inputs
+        length = labeled_length
 
     outputs, state = tf.nn.dynamic_rnn(
         cell=cell,
@@ -167,14 +224,34 @@ def rnn_model_fn(features, target, mode, params):
 
     prediction = tf.reshape(softmax, [-1, MAX_SENTENCE_LENGTH, num_classes])
 
-    loss = None
-    if mode != tf.contrib.learn.ModeKeys.INFER:
-        target = tf.one_hot(target, num_classes)
-        cross_entropy = -tf.reduce_sum(target * tf.log(prediction), reduction_indices=2) * mask
-        cross_entropy = tf.reduce_sum(cross_entropy, reduction_indices=1) / tf.cast(length, tf.float32)
-        loss = tf.reduce_mean(cross_entropy)
+    if mode == tf.contrib.learn.ModeKeys.TRAIN:
+        shape = tf.shape(prediction)
+        half = tf.to_int32(shape[0] / 2)
+        labeled_prediction = tf.slice(prediction, [0, 0, 0], [half, shape[1], shape[2]])
+        unlabeled_prediction = tf.slice(prediction, [half, 0, 0], [half, shape[1], shape[2]])
+        prediction = labeled_prediction
 
-    prediction = tf.argmax(prediction, 2)
+        target = tf.one_hot(target, num_classes)
+        cross_entropy = -tf.reduce_sum(target * tf.log(labeled_prediction), reduction_indices=2) * labeled_mask
+        cross_entropy = tf.reduce_sum(cross_entropy, reduction_indices=1) / tf.cast(labeled_length, tf.float32)
+        labeled_loss = tf.reduce_mean(cross_entropy)
+
+        pseudo_target = tf.argmax(unlabeled_prediction, 2)
+        pseudo_target = tf.one_hot(pseudo_target, num_classes)
+        cross_entropy = -tf.reduce_sum(pseudo_target * tf.log(unlabeled_prediction), reduction_indices=2) * unlabeled_mask
+        cross_entropy = tf.reduce_sum(cross_entropy, reduction_indices=1) / tf.cast(unlabeled_length, tf.float32)
+        unlabeled_loss = tf.reduce_mean(cross_entropy)
+
+        loss = labeled_loss + unlabeled_loss * coefficient_balancing(tf.constant(300),
+                                                                     tf.constant(700),
+                                                                     tf.constant(3),
+                                                                     tf.to_int32(tf.train.get_global_step() / 10))
+
+    else:
+        target = tf.one_hot(target, num_classes)
+        cross_entropy = -tf.reduce_sum(target * tf.log(prediction), reduction_indices=2) * labeled_mask
+        cross_entropy = tf.reduce_sum(cross_entropy, reduction_indices=1) / tf.cast(labeled_length, tf.float32)
+        loss = tf.reduce_mean(cross_entropy)
 
     train_op = None
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
@@ -185,14 +262,16 @@ def rnn_model_fn(features, target, mode, params):
             optimizer='RMSProp'
         )
 
+    target = tf.argmax(target, 2)
+    prediction = tf.argmax(prediction, 2)
+
     eval_metric_ops = None
     if mode != tf.contrib.learn.ModeKeys.INFER:
-        target = tf.argmax(target, 2)
         eval_metric_ops = {
             'accuracy': tf.metrics.accuracy(
                 labels=target,
                 predictions=prediction,
-                weights=mask
+                weights=labeled_mask
             ),
             # 'predictions': prediction,
             # 'target': target,
@@ -217,10 +296,12 @@ def main(unused_argv):
     training_set = load_dataset('./atis.train')
     validation_set = load_dataset('./atis.dev')
     test_set = load_dataset('./atis.test')
+    unlabeled_set = load_dataset('./unlabeled.train')
 
     print('# training_set (%d)' % training_set['size'])
     print('# validation_set (%d)' % validation_set['size'])
     print('# test_set (%d)' % test_set['size'])
+    print('# unlabeled_set (%d)' % unlabeled_set['size'])
 
     classifier = tf.contrib.learn.Estimator(
         model_fn=rnn_model_fn,
@@ -237,28 +318,28 @@ def main(unused_argv):
             tf.contrib.learn.MetricSpec(
                 metric_fn=tf.contrib.metrics.streaming_accuracy,
                 prediction_key='predictions',
-                weight_key='mask'
+                weight_key='labeled_mask'
             )
     }
 
     monitor = tf.contrib.learn.monitors.ValidationMonitor(
-        input_fn=lambda: input_fn(slot_vocab, word_vocab, validation_set, validation_set['size']),
+        input_fn=lambda: input_fn(slot_vocab, word_vocab, validation_set, size=validation_set['size']),
         eval_steps=1,
         every_n_steps=50,
         metrics=validation_metrics,
-        early_stopping_metric="loss",
-        early_stopping_metric_minimize=True,
-        early_stopping_rounds=300
+        # early_stopping_metric="loss",
+        # early_stopping_metric_minimize=True,
+        # early_stopping_rounds=500
     )
 
     classifier.fit(
-        input_fn=lambda: input_fn(slot_vocab, word_vocab, training_set),
+        input_fn=lambda: input_fn(slot_vocab, word_vocab, training_set, unlabeled_set),
         monitors=[monitor],
         steps=1000
     )
 
     accuracy_score = classifier.evaluate(
-        input_fn=lambda: input_fn(slot_vocab, word_vocab, test_set, test_set['size']),
+        input_fn=lambda: input_fn(slot_vocab, word_vocab, test_set, size=test_set['size']),
         steps=1
     )["accuracy"]
     print('Accuracy: {0:f}'.format(accuracy_score))
