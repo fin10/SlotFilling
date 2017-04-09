@@ -1,174 +1,36 @@
-import copy
-import random
-import re
-
 import numpy as np
 import tensorflow as tf
 
+from DataSet import DataSet
+
 tf.logging.set_verbosity(tf.logging.INFO)
-EMBEDDING_DIMENSION = 128
-MAX_SENTENCE_LENGTH = 100
 CELL_SIZE = 128
 BATCH_SIZE = 64
 NUM_LAYERS = 1
-UNK = '<unk>'
 
 
-def load_slot_vocab(path: str):
-    vocab = {UNK: 0}
-    with open(path, 'r') as file:
-        for line in file:
-            line = line.strip()
-            if len(line) > 0:
-                vocab[line] = len(vocab)
-
-    return vocab
-
-
-def load_word_vocab(path: str):
-    with open(path, 'r') as file:
-        vocab = eval(file.read())
-        for word, value in vocab.items():
-            vocab[word] = np.frombuffer(value, dtype=np.float32)
-
-        unk = np.zeros([EMBEDDING_DIMENSION], dtype=np.float32)
-        unk.fill(-1)
-        vocab[UNK] = unk
-
-    return vocab
-
-
-def load_dataset(data_path: str, size: int = -1):
-    IOB_REGEX = re.compile('\(([^)]+)\)\[([^\]]+)\]')
-
-    data = []
-    target = []
-    with open(data_path, 'r') as file:
-        for line in file:
-            for match in IOB_REGEX.finditer(line):
-                tokens = match.group(1).split(' ')
-                iob = ' '.join(['{}/{}-{}'.format(tokens[i], (i == 0 and 'b' or 'i'), match.group(2))
-                                for i in range(len(tokens))]).strip()
-                line = line.replace(match.group(0), iob)
-
-            words = []
-            tags = []
-            tokens = line.strip().lower().split(' ')
-            for token in tokens:
-                if '/' in token:
-                    part = token.partition('/')
-                    words.append(part[0])
-                    tags.append(part[2])
-                else:
-                    words.append(token)
-                    tags.append('o')
-
-            if len(words) > MAX_SENTENCE_LENGTH:
-                raise OverflowError('size:%d, %s' % (len(words), line))
-
-            data.append(words)
-            target.append(tags)
-
-    if size > -1:
-        indices = random.sample([x for x in range(len(data))], size)
-        data = [data[i] for i in indices]
-        target = [target[i] for i in indices]
-
-    return {
-        'data': data,
-        'target': target,
-        'size': len(data)
-    }
-
-
-def parse_data(slot_vocab: dict, word_vocab: dict, data, target):
-    inputs = []
-    lengths = []
-    masks = []
-    labels = []
-
-    for d, t in zip(data, target):
-        words = copy.deepcopy(d)
-        tags = copy.deepcopy(t)
-        if len(words) is not len(tags):
-            raise ValueError('length is not same. ({})'.format(words))
-        if len(words) > MAX_SENTENCE_LENGTH:
-            raise OverflowError('length is too long. ({})'.format(len(words)))
-        length = len(words)
-
-        mask = []
-        for j in range(length):
-            mask.append(1.0)
-
-        for j in range(MAX_SENTENCE_LENGTH - length):
-            words.append(UNK)
-            tags.append(UNK)
-            mask.append(0.0)
-
-        for j in range(MAX_SENTENCE_LENGTH):
-            if tags[j] not in slot_vocab:
-                raise ValueError('{} is not included in slot vocab'.format(tags[j]))
-            else:
-                tags[j] = slot_vocab[tags[j]]
-
-        for j in range(MAX_SENTENCE_LENGTH):
-            if words[j] not in word_vocab:
-                words[j] = word_vocab[UNK]
-            else:
-                words[j] = word_vocab[words[j]]
-
-        inputs.append(words)
-        lengths.append(length)
-        masks.append(mask)
-        labels.append(tags)
-
-    return {
-        'inputs': inputs,
-        'lengths': lengths,
-        'masks': masks,
-        'labels': labels
-    }
-
-
-def input_fn(slot_vocab: dict, word_vocab: dict, dataset: dict, unlabeled_dataset: dict = None, size: int = BATCH_SIZE):
+def input_fn(dataset: DataSet, unlabeled_dataset: DataSet = None, size: int = BATCH_SIZE):
     input_dict = {
     }
 
     # unlabeled data
     if unlabeled_dataset is not None:
-        indices = random.sample([x for x in range(unlabeled_dataset['size'])], size)
-        result = parse_data(
-            slot_vocab=slot_vocab,
-            word_vocab=word_vocab,
-            data=[unlabeled_dataset['data'][idx] for idx in indices],
-            target=[unlabeled_dataset['target'][idx] for idx in indices]
-        )
-
-        input_dict['unlabeled_inputs'] = tf.constant(np.array(result['inputs']))
-        input_dict['unlabeled_sequence_length'] = tf.constant(result['lengths'])
-        input_dict['unlabeled_mask'] = tf.constant(result['masks'])
+        unlabeled_dataset = unlabeled_dataset.sample(size)
+        input_dict['unlabeled_inputs'] = tf.constant(np.array(unlabeled_dataset.inputs()))
+        input_dict['unlabeled_sequence_length'] = tf.constant(unlabeled_dataset.lengths())
+        input_dict['unlabeled_mask'] = tf.constant(unlabeled_dataset.masks())
     else:
-        input_dict['unlabeled_inputs'] = tf.zeros([1, MAX_SENTENCE_LENGTH, EMBEDDING_DIMENSION], dtype=tf.float32)
+        input_dict['unlabeled_inputs'] = tf.zeros([1, DataSet.MAX_SENTENCE_LENGTH, DataSet.EMBEDDING_DIMENSION],
+                                                  dtype=tf.float32)
         input_dict['unlabeled_sequence_length'] = tf.zeros([1], dtype=tf.int32)
-        input_dict['unlabeled_mask'] = tf.zeros([1, MAX_SENTENCE_LENGTH], dtype=tf.float32)
+        input_dict['unlabeled_mask'] = tf.zeros([1, DataSet.MAX_SENTENCE_LENGTH], dtype=tf.float32)
 
     # labeled data
-    if size == dataset['size']:
-        indices = [x for x in range(dataset['size'])]
-    else:
-        indices = random.sample([x for x in range(dataset['size'])], size)
-
-    result = parse_data(
-        slot_vocab=slot_vocab,
-        word_vocab=word_vocab,
-        data=[dataset['data'][idx] for idx in indices],
-        target=[dataset['target'][idx] for idx in indices]
-    )
-
-    input_dict['labeled_inputs'] = tf.constant(np.array(result['inputs']))
-    input_dict['labeled_sequence_length'] = tf.constant(result['lengths'])
-    input_dict['labeled_mask'] = tf.constant(result['masks'])
-    labels = tf.constant(result['labels'])
+    dataset = dataset.sample(size)
+    input_dict['labeled_inputs'] = tf.constant(np.array(dataset.inputs()))
+    input_dict['labeled_sequence_length'] = tf.constant(dataset.lengths())
+    input_dict['labeled_mask'] = tf.constant(dataset.masks())
+    labels = tf.constant(dataset.labels())
 
     return input_dict, labels
 
@@ -222,7 +84,7 @@ def rnn_model_fn(features, target, mode, params):
         bias = tf.Variable(tf.constant(0.1, shape=[num_classes]), name='bias')
         softmax = tf.nn.softmax(tf.matmul(output, weight) + bias)
 
-    prediction = tf.reshape(softmax, [-1, MAX_SENTENCE_LENGTH, num_classes])
+    prediction = tf.reshape(softmax, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
 
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
         shape = tf.shape(prediction)
@@ -290,23 +152,21 @@ def rnn_model_fn(features, target, mode, params):
 
 
 def main(unused_argv):
-    slot_vocab = load_slot_vocab('./atis.slot')
-    word_vocab = load_word_vocab('./word2vec.embeddings')
+    DataSet.init('./atis.slot')
+    training_set = DataSet('./atis.train')
+    validation_set = DataSet('./atis.dev')
+    test_set = DataSet('./atis.test')
+    unlabeled_set = DataSet('./asr.unlabeled')
 
-    training_set = load_dataset('./atis.train')
-    validation_set = load_dataset('./atis.dev')
-    test_set = load_dataset('./atis.test')
-    unlabeled_set = load_dataset('./unlabeled.train')
-
-    print('# training_set (%d)' % training_set['size'])
-    print('# validation_set (%d)' % validation_set['size'])
-    print('# test_set (%d)' % test_set['size'])
-    print('# unlabeled_set (%d)' % unlabeled_set['size'])
+    print('# training_set (%d)' % training_set.size())
+    print('# validation_set (%d)' % validation_set.size())
+    print('# test_set (%d)' % test_set.size())
+    print('# unlabeled_set (%d)' % unlabeled_set.size())
 
     classifier = tf.contrib.learn.Estimator(
         model_fn=rnn_model_fn,
         params={
-            'num_classes': len(slot_vocab),
+            'num_classes': DataSet.num_classes(),
             'learning_rate': 0.01
         },
         config=tf.contrib.learn.RunConfig(save_checkpoints_secs=5),
@@ -323,7 +183,7 @@ def main(unused_argv):
     }
 
     monitor = tf.contrib.learn.monitors.ValidationMonitor(
-        input_fn=lambda: input_fn(slot_vocab, word_vocab, validation_set, size=validation_set['size']),
+        input_fn=lambda: input_fn(validation_set, size=-1),
         eval_steps=1,
         every_n_steps=50,
         metrics=validation_metrics,
@@ -333,13 +193,13 @@ def main(unused_argv):
     )
 
     classifier.fit(
-        input_fn=lambda: input_fn(slot_vocab, word_vocab, training_set, unlabeled_set),
+        input_fn=lambda: input_fn(training_set, unlabeled_set),
         monitors=[monitor],
         steps=1000
     )
 
     accuracy_score = classifier.evaluate(
-        input_fn=lambda: input_fn(slot_vocab, word_vocab, test_set, size=test_set['size']),
+        input_fn=lambda: input_fn(test_set, size=-1),
         steps=1
     )["accuracy"]
     print('Accuracy: {0:f}'.format(accuracy_score))
