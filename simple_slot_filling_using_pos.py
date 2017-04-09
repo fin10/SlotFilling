@@ -19,11 +19,13 @@ def input_fn(dataset: DataSet, unlabeled_dataset: DataSet = None, size: int = BA
         input_dict['unlabeled_inputs'] = tf.constant(np.array(unlabeled_dataset.inputs()))
         input_dict['unlabeled_sequence_length'] = tf.constant(unlabeled_dataset.lengths())
         input_dict['unlabeled_mask'] = tf.constant(unlabeled_dataset.masks())
+        input_dict['unlabeled_target'] = tf.constant(unlabeled_dataset.labels())
     else:
         input_dict['unlabeled_inputs'] = tf.zeros([1, DataSet.MAX_SENTENCE_LENGTH, DataSet.EMBEDDING_DIMENSION],
                                                   dtype=tf.float32)
         input_dict['unlabeled_sequence_length'] = tf.zeros([1], dtype=tf.int32)
         input_dict['unlabeled_mask'] = tf.zeros([1, DataSet.MAX_SENTENCE_LENGTH], dtype=tf.float32)
+        input_dict['unlabeled_target'] = tf.zeros([1, DataSet.MAX_SENTENCE_LENGTH], dtype=tf.int32)
 
     # labeled data
     dataset = dataset.sample(size)
@@ -46,6 +48,7 @@ def coefficient_balancing(t1, t2, af, t):
 
 def rnn_model_fn(features, target, mode, params):
     num_classes = params['num_classes']
+    num_pos = params['num_pos']
     learning_rate = params['learning_rate']
     dropout = mode == tf.contrib.learn.ModeKeys.TRAIN and 0.5 or 1.0
 
@@ -62,6 +65,7 @@ def rnn_model_fn(features, target, mode, params):
     unlabeled_inputs = features['unlabeled_inputs']
     unlabeled_length = features['unlabeled_sequence_length']
     unlabeled_mask = features['unlabeled_mask']
+    unlabeled_target = features['unlabeled_target']
 
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
         inputs = tf.concat([labeled_inputs, unlabeled_inputs], 0)
@@ -86,21 +90,29 @@ def rnn_model_fn(features, target, mode, params):
 
     prediction = tf.reshape(softmax, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
 
+    with tf.name_scope('softmax_unlabeled'):
+        weight = tf.Variable(tf.truncated_normal([CELL_SIZE, num_pos], stddev=0.01), name='weights')
+        bias = tf.Variable(tf.constant(0.1, shape=[num_pos]), name='bias')
+        softmax = tf.nn.softmax(tf.matmul(output, weight) + bias)
+
+    unlabeled_prediction = tf.reshape(softmax, [-1, DataSet.MAX_SENTENCE_LENGTH, num_pos])
+
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
         shape = tf.shape(prediction)
+        prediction = tf.slice(prediction, [0, 0, 0], [tf.to_int32(shape[0] / 2), shape[1], shape[2]])
+
+        shape = tf.shape(unlabeled_prediction)
         half = tf.to_int32(shape[0] / 2)
-        labeled_prediction = tf.slice(prediction, [0, 0, 0], [half, shape[1], shape[2]])
-        unlabeled_prediction = tf.slice(prediction, [half, 0, 0], [half, shape[1], shape[2]])
-        prediction = labeled_prediction
+        unlabeled_prediction = tf.slice(unlabeled_prediction, [half, 0, 0], [half, shape[1], shape[2]])
 
         target = tf.one_hot(target, num_classes)
-        cross_entropy = -tf.reduce_sum(target * tf.log(labeled_prediction), reduction_indices=2) * labeled_mask
+        cross_entropy = -tf.reduce_sum(target * tf.log(prediction), reduction_indices=2) * labeled_mask
         cross_entropy = tf.reduce_sum(cross_entropy, reduction_indices=1) / tf.cast(labeled_length, tf.float32)
         labeled_loss = tf.reduce_mean(cross_entropy)
 
-        pseudo_target = tf.argmax(unlabeled_prediction, 2)
-        pseudo_target = tf.one_hot(pseudo_target, num_classes)
-        cross_entropy = -tf.reduce_sum(pseudo_target * tf.log(unlabeled_prediction), reduction_indices=2) * unlabeled_mask
+        unlabeled_target = tf.one_hot(unlabeled_target, num_pos)
+        cross_entropy = -tf.reduce_sum(unlabeled_target * tf.log(unlabeled_prediction),
+                                       reduction_indices=2) * unlabeled_mask
         cross_entropy = tf.reduce_sum(cross_entropy, reduction_indices=1) / tf.cast(unlabeled_length, tf.float32)
         unlabeled_loss = tf.reduce_mean(cross_entropy)
 
@@ -151,12 +163,12 @@ def rnn_model_fn(features, target, mode, params):
     )
 
 
-def main(unused_argv):
+def main(unused_args):
     DataSet.init()
     training_set = DataSet('./atis.slot', './atis.train')
     validation_set = DataSet('./atis.slot', './atis.dev')
     test_set = DataSet('./atis.slot', './atis.test')
-    unlabeled_set = DataSet('./atis.slot', './asr.unlabeled')
+    unlabeled_set = DataSet('./pos.slot', './pos.unlabeled')
 
     print('# training_set (%d)' % training_set.size())
     print('# validation_set (%d)' % validation_set.size())
@@ -167,6 +179,7 @@ def main(unused_argv):
         model_fn=rnn_model_fn,
         params={
             'num_classes': training_set.num_classes(),
+            'num_pos': unlabeled_set.num_classes(),
             'learning_rate': 0.01
         },
         config=tf.contrib.learn.RunConfig(save_checkpoints_secs=5),

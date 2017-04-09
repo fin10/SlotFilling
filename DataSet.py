@@ -12,12 +12,18 @@ class DataSet:
     MAX_SENTENCE_LENGTH = 100
     UNK = '<unk>'
 
-    __slot_vocab = None
     __word_vocab = None
 
-    def __init__(self, data_path: str = None):
-        if DataSet.__slot_vocab is None or DataSet.__word_vocab is None:
+    def __init__(self, slot_vocab, data_path: str = None):
+        if DataSet.__word_vocab is None:
             raise ValueError('Need to initialize DataSet.')
+
+        if type(slot_vocab) is str:
+            self.__slot_vocab = DataSet.__load_slot_vocab(slot_vocab)
+        elif type(slot_vocab) is dict:
+            self.__slot_vocab = slot_vocab
+        else:
+            raise ValueError('slot_vocab error.')
 
         if data_path is None:
             self.__inputs = []
@@ -81,7 +87,7 @@ class DataSet:
             return self
 
         indices = random.sample([x for x in range(self.size())], size)
-        new = DataSet()
+        new = DataSet(self.__slot_vocab)
         new.__inputs = [self.__inputs[index] for index in indices]
         new.__lengths = [self.__lengths[index] for index in indices]
         new.__masks = [self.__masks[index] for index in indices]
@@ -91,13 +97,15 @@ class DataSet:
         return new
 
     @staticmethod
-    def init(slot_vocab: str):
-        DataSet.__slot_vocab = DataSet.__load_slot_vocab(slot_vocab)
+    def init():
         DataSet.__word_vocab = DataSet.__load_word_vocab('./word2vec.embeddings')
 
     @staticmethod
     def __load_slot_vocab(path: str):
-        vocab = {DataSet.UNK: 0}
+        vocab = {
+            DataSet.UNK: 0
+        }
+
         with open(path, 'r') as file:
             for line in file:
                 line = line.strip()
@@ -167,6 +175,5 @@ class DataSet:
             'labels': labels
         }
 
-    @staticmethod
-    def num_classes():
-        return len(DataSet.__slot_vocab)
+    def num_classes(self):
+        return len(self.__slot_vocab)
