@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from DataSet import DataSet
+from data_set import DataSet
 
 tf.logging.set_verbosity(tf.logging.INFO)
 CELL_SIZE = 128
