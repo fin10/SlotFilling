@@ -4,16 +4,16 @@ import tensorflow as tf
 from data_set import DataSet
 
 tf.logging.set_verbosity(tf.logging.INFO)
-CELL_SIZE = 128
+CELL_SIZE = 300
 BATCH_SIZE = 64
-NUM_LAYERS = 1
+NUM_LAYERS = 3
 
 
 def input_fn(dataset: DataSet, size: int = BATCH_SIZE):
     input_dict = {
     }
 
-    dataset = dataset.sample(size)
+    dataset = dataset.get_batch(size)
     input_dict['labeled_inputs'] = tf.constant(np.array(dataset.inputs()))
     input_dict['labeled_sequence_length'] = tf.constant(dataset.lengths())
     input_dict['labeled_mask'] = tf.constant(dataset.masks())
@@ -27,28 +27,32 @@ def rnn_model_fn(features, target, mode, params):
     learning_rate = params['learning_rate']
     dropout = mode == tf.contrib.learn.ModeKeys.TRAIN and 0.5 or 1.0
 
-    cell = tf.contrib.rnn.GRUCell(CELL_SIZE)
-    cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
-    cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
-
     # labeled data
     labeled_inputs = features['labeled_inputs']
     labeled_length = features['labeled_sequence_length']
     labeled_mask = features['labeled_mask']
 
-    outputs, state = tf.nn.dynamic_rnn(
-        cell=cell,
-        inputs=labeled_inputs,
-        sequence_length=labeled_length,
-        dtype=tf.float32
-    )
+    with tf.name_scope('rnn'):
+        cell = tf.contrib.rnn.BasicLSTMCell(CELL_SIZE)
+        cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
+        cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
 
-    output = tf.reshape(outputs, [-1, CELL_SIZE])
+        outputs, state = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw=cell,
+            cell_bw=cell,
+            inputs=labeled_inputs,
+            sequence_length=labeled_length,
+            dtype=tf.float32
+        )
+
+    output_fw = tf.reshape(outputs[0], [-1, CELL_SIZE])
+    output_bw = tf.reshape(outputs[1], [-1, CELL_SIZE])
 
     with tf.name_scope('softmax'):
-        weight = tf.Variable(tf.truncated_normal([CELL_SIZE, num_classes], stddev=0.01), name='weights')
+        weight_fw = tf.Variable(tf.truncated_normal([CELL_SIZE, num_classes], stddev=0.01), name='weights_fw')
+        weight_bw = tf.Variable(tf.truncated_normal([CELL_SIZE, num_classes], stddev=0.01), name='weights_bw')
         bias = tf.Variable(tf.constant(0.1, shape=[num_classes]), name='bias')
-        softmax = tf.nn.softmax(tf.matmul(output, weight) + bias)
+        softmax = tf.nn.softmax(tf.matmul(output_fw, weight_fw) + tf.matmul(output_bw, weight_bw) + bias)
 
     prediction = tf.reshape(softmax, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
 
@@ -108,7 +112,7 @@ def main(unused_argv):
         model_fn=rnn_model_fn,
         params={
             'num_classes': training_set.num_classes(),
-            'learning_rate': 0.01
+            'learning_rate': 0.001
         },
         config=tf.contrib.learn.RunConfig(save_checkpoints_secs=5),
         model_dir='./model/'

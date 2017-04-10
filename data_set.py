@@ -25,6 +25,9 @@ class DataSet:
         else:
             raise ValueError('slot_vocab error.')
 
+        self.__epoch = 1
+        self.__last_idx = 0
+
         if data_path is None:
             self.__inputs = []
             self.__lengths = []
@@ -82,6 +85,9 @@ class DataSet:
     def size(self):
         return self.__size
 
+    def epoch(self):
+        return self.__epoch
+
     def sample(self, size: int):
         if size == -1 or size == self.size():
             return self
@@ -95,6 +101,35 @@ class DataSet:
         new.__size = size
 
         return new
+
+    def get_batch(self, size: int):
+        if size == -1 or size == self.size():
+            self.__epoch += 1
+            return self
+
+        start = self.__last_idx
+        self.__last_idx = start + size
+        if self.__last_idx >= self.size():
+            start = 0
+            self.__last_idx = size
+            self.__epoch += 1
+            self.shuffle()
+
+        new = DataSet(self.__slot_vocab)
+        new.__inputs = self.__inputs[start:self.__last_idx]
+        new.__lengths = self.__lengths[start:self.__last_idx]
+        new.__masks = self.__masks[start:self.__last_idx]
+        new.__labels = self.__labels[start:self.__last_idx]
+        new.__size = size
+
+        return new
+
+    def shuffle(self):
+        indices = random.shuffle([x for x in range(self.size())])
+        self.__inputs = [self.__inputs[index] for index in indices]
+        self.__lengths = [self.__lengths[index] for index in indices]
+        self.__masks = [self.__masks[index] for index in indices]
+        self.__labels = [self.__labels[index] for index in indices]
 
     @staticmethod
     def init():
