@@ -4,9 +4,9 @@ import tensorflow as tf
 from data_set import DataSet
 
 tf.logging.set_verbosity(tf.logging.INFO)
-CELL_SIZE = 300
+CELL_SIZE = 128
 BATCH_SIZE = 64
-NUM_LAYERS = 3
+NUM_LAYERS = 1
 
 
 def input_fn(dataset: DataSet, size: int = BATCH_SIZE):
@@ -24,7 +24,6 @@ def input_fn(dataset: DataSet, size: int = BATCH_SIZE):
 
 def rnn_model_fn(features, target, mode, params):
     num_classes = params['num_classes']
-    learning_rate = params['learning_rate']
     dropout = mode == tf.contrib.learn.ModeKeys.TRAIN and 0.5 or 1.0
 
     # labeled data
@@ -33,7 +32,7 @@ def rnn_model_fn(features, target, mode, params):
     labeled_mask = features['labeled_mask']
 
     with tf.name_scope('rnn'):
-        cell = tf.contrib.rnn.BasicLSTMCell(CELL_SIZE)
+        cell = tf.contrib.rnn.GRUCell(CELL_SIZE)
         cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
         cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
 
@@ -49,9 +48,15 @@ def rnn_model_fn(features, target, mode, params):
     output_bw = tf.reshape(outputs[1], [-1, CELL_SIZE])
 
     with tf.name_scope('softmax'):
-        weight_fw = tf.Variable(tf.truncated_normal([CELL_SIZE, num_classes], stddev=0.01), name='weights_fw')
-        weight_bw = tf.Variable(tf.truncated_normal([CELL_SIZE, num_classes], stddev=0.01), name='weights_bw')
-        bias = tf.Variable(tf.constant(0.1, shape=[num_classes]), name='bias')
+        weight_fw = tf.get_variable(name='weights_fw',
+                                    shape=[CELL_SIZE, num_classes],
+                                    initializer=tf.random_uniform_initializer(-1, 1))
+        weight_bw = tf.get_variable(name='weights_bw',
+                                    shape=[CELL_SIZE, num_classes],
+                                    initializer=tf.random_uniform_initializer(-1, 1))
+        bias = tf.get_variable(name='bias',
+                               shape=[num_classes],
+                               initializer=tf.random_uniform_initializer(-1, 1))
         softmax = tf.nn.softmax(tf.matmul(output_fw, weight_fw) + tf.matmul(output_bw, weight_bw) + bias)
 
     prediction = tf.reshape(softmax, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
@@ -63,9 +68,10 @@ def rnn_model_fn(features, target, mode, params):
 
     train_op = None
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
+        learning_rate = tf.constant(0.0001)
         train_op = tf.contrib.layers.optimize_loss(
             loss=loss,
-            global_step=tf.train.get_global_step(),
+            global_step=tf.contrib.framework.get_global_step(),
             learning_rate=learning_rate,
             optimizer='RMSProp'
         )
@@ -111,10 +117,9 @@ def main(unused_argv):
     classifier = tf.contrib.learn.Estimator(
         model_fn=rnn_model_fn,
         params={
-            'num_classes': training_set.num_classes(),
-            'learning_rate': 0.001
+            'num_classes': training_set.num_classes()
         },
-        config=tf.contrib.learn.RunConfig(save_checkpoints_secs=5),
+        config=tf.contrib.learn.RunConfig(save_checkpoints_secs=30),
         model_dir='./model/'
     )
 
