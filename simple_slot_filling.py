@@ -31,44 +31,37 @@ def rnn_model_fn(features, target, mode, params):
     labeled_length = features['labeled_sequence_length']
     labeled_mask = features['labeled_mask']
 
-    with tf.name_scope('rnn'):
-        cell = tf.contrib.rnn.GRUCell(CELL_SIZE)
-        cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
-        cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
+    cell = tf.contrib.rnn.GRUCell(CELL_SIZE)
+    cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
+    cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
 
-        outputs, state = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw=cell,
-            cell_bw=cell,
-            inputs=labeled_inputs,
-            sequence_length=labeled_length,
-            dtype=tf.float32
-        )
+    outputs, state = tf.nn.bidirectional_dynamic_rnn(
+        cell_fw=cell,
+        cell_bw=cell,
+        inputs=labeled_inputs,
+        sequence_length=labeled_length,
+        dtype=tf.float32
+    )
 
-    output_fw = tf.reshape(outputs[0], [-1, CELL_SIZE])
-    output_bw = tf.reshape(outputs[1], [-1, CELL_SIZE])
-
-    with tf.name_scope('softmax'):
-        weight_fw = tf.get_variable(name='weights_fw',
-                                    shape=[CELL_SIZE, num_classes],
-                                    initializer=tf.random_uniform_initializer(-1, 1))
-        weight_bw = tf.get_variable(name='weights_bw',
-                                    shape=[CELL_SIZE, num_classes],
-                                    initializer=tf.random_uniform_initializer(-1, 1))
-        bias = tf.get_variable(name='bias',
-                               shape=[num_classes],
-                               initializer=tf.random_uniform_initializer(-1, 1))
-        softmax = tf.nn.softmax(tf.matmul(output_fw, weight_fw) + tf.matmul(output_bw, weight_bw) + bias)
-
-    prediction = tf.reshape(softmax, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
+    prediction = tf.contrib.layers.fully_connected(
+        inputs=outputs[-1],
+        num_outputs=num_classes,
+        activation_fn=tf.nn.sigmoid,
+        weights_initializer=tf.random_uniform_initializer(-1, 1),
+        biases_initializer=tf.zeros_initializer()
+    )
+    prediction = tf.reshape(prediction, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
 
     target = tf.one_hot(target, num_classes)
-    cross_entropy = -tf.reduce_sum(target * tf.log(prediction), reduction_indices=2) * labeled_mask
-    cross_entropy = tf.reduce_sum(cross_entropy, reduction_indices=1) / tf.cast(labeled_length, tf.float32)
-    loss = tf.reduce_mean(cross_entropy)
+    loss = tf.losses.softmax_cross_entropy(
+        onehot_labels=target,
+        logits=prediction,
+        weights=labeled_mask
+    )
 
     train_op = None
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
-        learning_rate = tf.constant(0.0001)
+        learning_rate = tf.constant(0.01)
         train_op = tf.contrib.layers.optimize_loss(
             loss=loss,
             global_step=tf.contrib.framework.get_global_step(),
@@ -81,7 +74,6 @@ def rnn_model_fn(features, target, mode, params):
 
     eval_metric_ops = None
     if mode != tf.contrib.learn.ModeKeys.INFER:
-
         eval_metric_ops = {
             'accuracy': tf.metrics.accuracy(
                 labels=target,
