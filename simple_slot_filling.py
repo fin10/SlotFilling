@@ -5,7 +5,7 @@ from data_set import DataSet
 
 tf.logging.set_verbosity(tf.logging.INFO)
 CELL_SIZE = 128
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 NUM_LAYERS = 1
 
 
@@ -24,7 +24,7 @@ def input_fn(dataset: DataSet, size: int = BATCH_SIZE):
 
 def rnn_model_fn(features, target, mode, params):
     num_classes = params['num_classes']
-    dropout = mode == tf.contrib.learn.ModeKeys.TRAIN and 0.5 or 1.0
+    dropout = mode == tf.contrib.learn.ModeKeys.TRAIN and 0.7 or 1.0
 
     # labeled data
     labeled_inputs = features['labeled_inputs']
@@ -42,32 +42,21 @@ def rnn_model_fn(features, target, mode, params):
     cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
     cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
 
-    outputs, state = tf.nn.bidirectional_dynamic_rnn(
-        cell_fw=cell,
-        cell_bw=cell,
+    outputs, state = tf.nn.dynamic_rnn(
+        cell=cell,
         inputs=labeled_inputs,
         sequence_length=labeled_length,
         dtype=tf.float32
     )
 
-    activations_fw = tf.contrib.layers.fully_connected(
-        inputs=outputs[0],
+    activations = tf.contrib.layers.fully_connected(
+        inputs=outputs,
         num_outputs=num_classes,
-        # activation_fn=tf.nn.sigmoid,
-        weights_initializer=tf.random_uniform_initializer(-1, 1),
-        biases_initializer=tf.zeros_initializer()
+        activation_fn=tf.nn.relu,
+        weights_initializer=tf.contrib.layers.xavier_initializer()
     )
 
-    activations_bw = tf.contrib.layers.fully_connected(
-        inputs=outputs[1],
-        num_outputs=num_classes,
-        # activation_fn=tf.nn.sigmoid,
-        weights_initializer=tf.random_uniform_initializer(-1, 1),
-        biases_initializer=tf.zeros_initializer()
-    )
-
-    prediction = activations_fw + activations_bw
-    prediction = tf.reshape(prediction, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
+    prediction = tf.reshape(activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
 
     target = tf.one_hot(target, num_classes)
     loss = tf.losses.softmax_cross_entropy(
@@ -76,14 +65,19 @@ def rnn_model_fn(features, target, mode, params):
         weights=labeled_mask
     )
 
+    learning_rate = tf.train.exponential_decay(
+        learning_rate=0.001,
+        global_step=tf.contrib.framework.get_global_step(),
+        decay_steps=100,
+        decay_rate=0.96
+    )
     train_op = None
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
-        learning_rate = tf.constant(0.01)
         train_op = tf.contrib.layers.optimize_loss(
             loss=loss,
             global_step=tf.contrib.framework.get_global_step(),
             learning_rate=learning_rate,
-            optimizer='RMSProp'
+            optimizer='Adam'
         )
 
     target = tf.argmax(target, 2)
