@@ -31,6 +31,13 @@ def rnn_model_fn(features, target, mode, params):
     labeled_length = features['labeled_sequence_length']
     labeled_mask = features['labeled_mask']
 
+    embeddings = tf.get_variable(
+        name='embeddings',
+        shape=[DataSet.vocab_size(), 128],
+        initializer=tf.random_uniform_initializer(-1, 1)
+    )
+    labeled_inputs = tf.nn.embedding_lookup(embeddings, labeled_inputs)
+
     cell = tf.contrib.rnn.GRUCell(CELL_SIZE)
     cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
     cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
@@ -43,13 +50,23 @@ def rnn_model_fn(features, target, mode, params):
         dtype=tf.float32
     )
 
-    prediction = tf.contrib.layers.fully_connected(
-        inputs=outputs[-1],
+    activations_fw = tf.contrib.layers.fully_connected(
+        inputs=outputs[0],
         num_outputs=num_classes,
-        activation_fn=tf.nn.sigmoid,
+        # activation_fn=tf.nn.sigmoid,
         weights_initializer=tf.random_uniform_initializer(-1, 1),
         biases_initializer=tf.zeros_initializer()
     )
+
+    activations_bw = tf.contrib.layers.fully_connected(
+        inputs=outputs[1],
+        num_outputs=num_classes,
+        # activation_fn=tf.nn.sigmoid,
+        weights_initializer=tf.random_uniform_initializer(-1, 1),
+        biases_initializer=tf.zeros_initializer()
+    )
+
+    prediction = activations_fw + activations_bw
     prediction = tf.reshape(prediction, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
 
     target = tf.one_hot(target, num_classes)
@@ -97,7 +114,6 @@ def rnn_model_fn(features, target, mode, params):
 
 
 def main(unused_argv):
-    DataSet.init()
     training_set = DataSet('./atis.slot', './atis.train')
     validation_set = DataSet('./atis.slot', './atis.dev')
     test_set = DataSet('./atis.slot', './atis.test')

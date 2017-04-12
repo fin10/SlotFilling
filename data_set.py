@@ -3,6 +3,7 @@ import random
 import re
 
 import numpy as np
+from tensorflow.contrib.learn.python.learn.preprocessing import VocabularyProcessor
 
 
 class DataSet:
@@ -16,7 +17,13 @@ class DataSet:
 
     def __init__(self, slot_vocab, data_path: str = None):
         if DataSet.__word_vocab is None:
-            raise ValueError('Need to initialize DataSet.')
+            def space_tokenizer_fn(iterator):
+                yield iterator
+
+            DataSet.__word_vocab = VocabularyProcessor(
+                max_document_length=DataSet.MAX_SENTENCE_LENGTH,
+                tokenizer_fn=space_tokenizer_fn
+            )
 
         if type(slot_vocab) is str:
             self.__slot_vocab = DataSet.__load_slot_vocab(slot_vocab)
@@ -132,10 +139,6 @@ class DataSet:
         self.__labels = [self.__labels[index] for index in indices]
 
     @staticmethod
-    def init():
-        DataSet.__word_vocab = DataSet.__load_word_vocab('./word2vec.embeddings')
-
-    @staticmethod
     def __load_slot_vocab(path: str):
         vocab = {
             DataSet.UNK: 0
@@ -182,7 +185,6 @@ class DataSet:
                 mask.append(1.0)
 
             for j in range(DataSet.MAX_SENTENCE_LENGTH - length):
-                words.append(DataSet.UNK)
                 tags.append(DataSet.UNK)
                 mask.append(0.0)
 
@@ -192,11 +194,7 @@ class DataSet:
                 else:
                     tags[j] = self.__slot_vocab[tags[j]]
 
-            for j in range(DataSet.MAX_SENTENCE_LENGTH):
-                if words[j] not in self.__word_vocab:
-                    words[j] = self.__word_vocab[DataSet.UNK]
-                else:
-                    words[j] = self.__word_vocab[words[j]]
+            words = list(DataSet.__word_vocab.transform(words))[0]
 
             inputs.append(words)
             lengths.append(length)
@@ -212,3 +210,7 @@ class DataSet:
 
     def num_classes(self):
         return len(self.__slot_vocab)
+
+    @staticmethod
+    def vocab_size():
+        return len(DataSet.__word_vocab.vocabulary_)
