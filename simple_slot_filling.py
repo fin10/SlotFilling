@@ -4,9 +4,12 @@ import tensorflow as tf
 from data_set import DataSet
 
 tf.logging.set_verbosity(tf.logging.INFO)
+EMBEDDING_SIZE = 128
 CELL_SIZE = 128
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 NUM_LAYERS = 1
+DROP_OUT = 0.7
+LEARNING_RATE = 0.001
 
 
 def input_fn(dataset: DataSet, size: int = BATCH_SIZE):
@@ -24,7 +27,7 @@ def input_fn(dataset: DataSet, size: int = BATCH_SIZE):
 
 def rnn_model_fn(features, target, mode, params):
     num_classes = params['num_classes']
-    dropout = mode == tf.contrib.learn.ModeKeys.TRAIN and 0.7 or 1.0
+    dropout = mode == tf.contrib.learn.ModeKeys.TRAIN and DROP_OUT or 1.0
 
     # labeled data
     labeled_inputs = features['labeled_inputs']
@@ -33,7 +36,7 @@ def rnn_model_fn(features, target, mode, params):
 
     embeddings = tf.get_variable(
         name='embeddings',
-        shape=[DataSet.vocab_size(), 128],
+        shape=[DataSet.vocab_size(), EMBEDDING_SIZE],
         initializer=tf.random_uniform_initializer(-1, 1)
     )
     labeled_inputs = tf.nn.embedding_lookup(embeddings, labeled_inputs)
@@ -66,7 +69,7 @@ def rnn_model_fn(features, target, mode, params):
     )
 
     learning_rate = tf.train.exponential_decay(
-        learning_rate=0.001,
+        learning_rate=LEARNING_RATE,
         global_step=tf.contrib.framework.get_global_step(),
         decay_steps=100,
         decay_rate=0.96
