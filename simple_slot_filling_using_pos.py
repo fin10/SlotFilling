@@ -94,7 +94,7 @@ def rnn_model_fn(features, target, mode, params):
         dtype=tf.float32
     )
 
-    with tf.name_scope('labeled'):
+    with tf.variable_scope('labeled'):
         activations_fw = tf.contrib.layers.fully_connected(
             inputs=outputs[0],
             num_outputs=num_classes,
@@ -125,7 +125,7 @@ def rnn_model_fn(features, target, mode, params):
             weights=labeled_mask
         )
 
-    with tf.name_scope('unlabeled'):
+    with tf.variable_scope('unlabeled'):
         unlabeled_loss = 0
         if mode == tf.contrib.learn.ModeKeys.TRAIN:
             activations_fw = tf.contrib.layers.fully_connected(
