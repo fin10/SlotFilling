@@ -2,14 +2,12 @@ import copy
 import random
 import re
 
-import numpy as np
 from tensorflow.contrib.learn.python.learn.preprocessing import VocabularyProcessor
 
 
 class DataSet:
     IOB_REGEX = re.compile('\(([^)]+)\)\[([^\]]+)\]')
 
-    EMBEDDING_DIMENSION = 128
     MAX_SENTENCE_LENGTH = 100
     UNK = '<unk>'
 
@@ -149,19 +147,6 @@ class DataSet:
                 line = line.strip()
                 if len(line) > 0:
                     vocab[line] = len(vocab)
-
-        return vocab
-
-    @staticmethod
-    def __load_word_vocab(path: str):
-        with open(path, 'r') as file:
-            vocab = eval(file.read())
-            for word, value in vocab.items():
-                vocab[word] = np.frombuffer(value, dtype=np.float32)
-
-            unk = np.zeros([DataSet.EMBEDDING_DIMENSION], dtype=np.float32)
-            unk.fill(-1)
-            vocab[DataSet.UNK] = unk
 
         return vocab
 

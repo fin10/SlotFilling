@@ -4,11 +4,11 @@ import tensorflow as tf
 from data_set import DataSet
 
 tf.logging.set_verbosity(tf.logging.INFO)
-EMBEDDING_SIZE = 128
+EMBEDDING_DIMENSION = 128
 CELL_SIZE = 128
 BATCH_SIZE = 256
 NUM_LAYERS = 1
-DROP_OUT = 0.7
+DROP_OUT = 0.5
 LEARNING_RATE = 0.001
 
 
@@ -36,8 +36,8 @@ def rnn_model_fn(features, target, mode, params):
 
     embeddings = tf.get_variable(
         name='embeddings',
-        shape=[DataSet.vocab_size(), EMBEDDING_SIZE],
-        initializer=tf.random_uniform_initializer(-1, 1)
+        shape=[DataSet.vocab_size(), EMBEDDING_DIMENSION],
+        initializer=tf.random_uniform_initializer(-1, 1, seed=123)
     )
     labeled_inputs = tf.nn.embedding_lookup(embeddings, labeled_inputs)
 
@@ -45,20 +45,29 @@ def rnn_model_fn(features, target, mode, params):
     cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
     cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
 
-    outputs, state = tf.nn.dynamic_rnn(
-        cell=cell,
+    outputs, state = tf.nn.bidirectional_dynamic_rnn(
+        cell_fw=cell,
+        cell_bw=cell,
         inputs=labeled_inputs,
         sequence_length=labeled_length,
         dtype=tf.float32
     )
 
-    activations = tf.contrib.layers.fully_connected(
-        inputs=outputs,
+    activations_fw = tf.contrib.layers.fully_connected(
+        inputs=outputs[0],
         num_outputs=num_classes,
         activation_fn=tf.nn.relu,
-        weights_initializer=tf.contrib.layers.xavier_initializer()
+        weights_initializer=tf.contrib.layers.xavier_initializer(seed=111)
     )
 
+    activations_bw = tf.contrib.layers.fully_connected(
+        inputs=outputs[1],
+        num_outputs=num_classes,
+        activation_fn=tf.nn.relu,
+        weights_initializer=tf.contrib.layers.xavier_initializer(seed=256)
+    )
+
+    activations = activations_fw + activations_bw
     prediction = tf.reshape(activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
 
     target = tf.one_hot(target, num_classes)
@@ -74,6 +83,7 @@ def rnn_model_fn(features, target, mode, params):
         decay_steps=100,
         decay_rate=0.96
     )
+
     train_op = None
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
         train_op = tf.contrib.layers.optimize_loss(
