@@ -94,61 +94,67 @@ def rnn_model_fn(features, target, mode, params):
         dtype=tf.float32
     )
 
-    activations_fw = tf.contrib.layers.fully_connected(
-        inputs=outputs[0],
-        num_outputs=num_classes,
-        activation_fn=tf.nn.relu,
-        weights_initializer=tf.contrib.layers.xavier_initializer(seed=111)
-    )
-
-    activations_bw = tf.contrib.layers.fully_connected(
-        inputs=outputs[1],
-        num_outputs=num_classes,
-        activation_fn=tf.nn.relu,
-        weights_initializer=tf.contrib.layers.xavier_initializer(seed=156)
-    )
-
-    labeled_activations = activations_fw + activations_bw
-    labeled_prediction = tf.reshape(labeled_activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
-
-    if mode == tf.contrib.learn.ModeKeys.TRAIN:
-        labeled_prediction = tf.slice(labeled_prediction, [0, 0, 0],
-                                      [BATCH_SIZE, DataSet.MAX_SENTENCE_LENGTH, num_classes])
-
-    labeled_target = tf.one_hot(labeled_target, num_classes)
-    labeled_loss = tf.losses.softmax_cross_entropy(
-        onehot_labels=labeled_target,
-        logits=labeled_prediction,
-        weights=labeled_mask
-    )
-
-    unlabeled_loss = 0
-    if mode == tf.contrib.learn.ModeKeys.TRAIN:
+    with tf.name_scope('labeled'):
         activations_fw = tf.contrib.layers.fully_connected(
             inputs=outputs[0],
-            num_outputs=num_pos,
+            num_outputs=num_classes,
             activation_fn=tf.nn.relu,
-            weights_initializer=tf.contrib.layers.xavier_initializer(seed=211)
+            weights_initializer=tf.contrib.layers.xavier_initializer(seed=111),
+            scope='fully_connected_fw'
         )
 
         activations_bw = tf.contrib.layers.fully_connected(
             inputs=outputs[1],
-            num_outputs=num_pos,
+            num_outputs=num_classes,
             activation_fn=tf.nn.relu,
-            weights_initializer=tf.contrib.layers.xavier_initializer(seed=256)
+            weights_initializer=tf.contrib.layers.xavier_initializer(seed=156),
+            scope='fully_connected_bw'
         )
 
-        unlabeled_activations = activations_fw + activations_bw
-        unlabeled_prediction = tf.reshape(unlabeled_activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_pos])
-        unlabeled_prediction = tf.slice(unlabeled_prediction, [BATCH_SIZE, 0, 0],
-                                        [BATCH_SIZE, DataSet.MAX_SENTENCE_LENGTH, num_pos])
+        labeled_activations = activations_fw + activations_bw
+        labeled_prediction = tf.reshape(labeled_activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
 
-        unlabeled_target = tf.one_hot(unlabeled_target, num_pos)
-        unlabeled_loss = tf.losses.softmax_cross_entropy(
-            onehot_labels=unlabeled_target,
-            logits=unlabeled_prediction,
-            weights=unlabeled_mask
+        if mode == tf.contrib.learn.ModeKeys.TRAIN:
+            labeled_prediction = tf.slice(labeled_prediction, [0, 0, 0],
+                                          [BATCH_SIZE, DataSet.MAX_SENTENCE_LENGTH, num_classes])
+
+        labeled_target = tf.one_hot(labeled_target, num_classes)
+        labeled_loss = tf.losses.softmax_cross_entropy(
+            onehot_labels=labeled_target,
+            logits=labeled_prediction,
+            weights=labeled_mask
         )
+
+    with tf.name_scope('unlabeled'):
+        unlabeled_loss = 0
+        if mode == tf.contrib.learn.ModeKeys.TRAIN:
+            activations_fw = tf.contrib.layers.fully_connected(
+                inputs=outputs[0],
+                num_outputs=num_pos,
+                activation_fn=tf.nn.relu,
+                weights_initializer=tf.contrib.layers.xavier_initializer(seed=211),
+                scope='fully_connected_fw'
+            )
+
+            activations_bw = tf.contrib.layers.fully_connected(
+                inputs=outputs[1],
+                num_outputs=num_pos,
+                activation_fn=tf.nn.relu,
+                weights_initializer=tf.contrib.layers.xavier_initializer(seed=256),
+                scope='fully_connected_bw'
+            )
+
+            unlabeled_activations = activations_fw + activations_bw
+            unlabeled_prediction = tf.reshape(unlabeled_activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_pos])
+            unlabeled_prediction = tf.slice(unlabeled_prediction, [BATCH_SIZE, 0, 0],
+                                            [BATCH_SIZE, DataSet.MAX_SENTENCE_LENGTH, num_pos])
+
+            unlabeled_target = tf.one_hot(unlabeled_target, num_pos)
+            unlabeled_loss = tf.losses.softmax_cross_entropy(
+                onehot_labels=unlabeled_target,
+                logits=unlabeled_prediction,
+                weights=unlabeled_mask
+            )
 
     loss = labeled_loss + unlabeled_loss * coefficient_balancing(tf.constant(300),
                                                                  tf.constant(700),

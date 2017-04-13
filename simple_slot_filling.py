@@ -64,7 +64,7 @@ def rnn_model_fn(features, target, mode, params):
         inputs=outputs[1],
         num_outputs=num_classes,
         activation_fn=tf.nn.relu,
-        weights_initializer=tf.contrib.layers.xavier_initializer(seed=256)
+        weights_initializer=tf.contrib.layers.xavier_initializer(seed=156)
     )
 
     activations = activations_fw + activations_bw
