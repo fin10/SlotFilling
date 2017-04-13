@@ -18,20 +18,19 @@ def input_fn(dataset: DataSet, unlabeled_dataset: DataSet = None, size: int = BA
 
     # unlabeled data
     if unlabeled_dataset is not None:
-        unlabeled_dataset = unlabeled_dataset.sample(size)
+        unlabeled_dataset = unlabeled_dataset.get_batch(size)
         input_dict['unlabeled_inputs'] = tf.constant(np.array(unlabeled_dataset.inputs()))
         input_dict['unlabeled_sequence_length'] = tf.constant(unlabeled_dataset.lengths())
         input_dict['unlabeled_mask'] = tf.constant(unlabeled_dataset.masks())
         input_dict['unlabeled_target'] = tf.constant(unlabeled_dataset.labels())
     else:
-        input_dict['unlabeled_inputs'] = tf.zeros([1, DataSet.MAX_SENTENCE_LENGTH, EMBEDDING_DIMENSION],
-                                                  dtype=tf.float32)
+        input_dict['unlabeled_inputs'] = tf.zeros([1, DataSet.MAX_SENTENCE_LENGTH], dtype=tf.int64)
         input_dict['unlabeled_sequence_length'] = tf.zeros([1], dtype=tf.int32)
         input_dict['unlabeled_mask'] = tf.zeros([1, DataSet.MAX_SENTENCE_LENGTH], dtype=tf.float32)
         input_dict['unlabeled_target'] = tf.zeros([1, DataSet.MAX_SENTENCE_LENGTH], dtype=tf.int32)
 
     # labeled data
-    dataset = dataset.sample(size)
+    dataset = dataset.get_batch(size)
     input_dict['labeled_inputs'] = tf.constant(np.array(dataset.inputs()))
     input_dict['labeled_sequence_length'] = tf.constant(dataset.lengths())
     input_dict['labeled_mask'] = tf.constant(dataset.masks())
@@ -124,7 +123,7 @@ def rnn_model_fn(features, target, mode, params):
     )
 
     unlabeled_loss = 0
-    if mode != tf.contrib.learn.ModeKeys.TRAIN:
+    if mode == tf.contrib.learn.ModeKeys.TRAIN:
         activations_fw = tf.contrib.layers.fully_connected(
             inputs=outputs[0],
             num_outputs=num_pos,
@@ -144,7 +143,7 @@ def rnn_model_fn(features, target, mode, params):
         unlabeled_prediction = tf.slice(unlabeled_prediction, [BATCH_SIZE, 0, 0],
                                         [BATCH_SIZE, DataSet.MAX_SENTENCE_LENGTH, num_pos])
 
-        unlabeled_target = tf.one_hot(unlabeled_target, num_classes)
+        unlabeled_target = tf.one_hot(unlabeled_target, num_pos)
         unlabeled_loss = tf.losses.softmax_cross_entropy(
             onehot_labels=unlabeled_target,
             logits=unlabeled_prediction,
@@ -200,7 +199,7 @@ def rnn_model_fn(features, target, mode, params):
 
 
 def main(unused_args):
-    training_set = DataSet('./atis.slot', './atis.train')
+    training_set = DataSet('./atis.slot', './atis.train').sample(400)
     validation_set = DataSet('./atis.slot', './atis.dev')
     test_set = DataSet('./atis.slot', './atis.test')
     unlabeled_set = DataSet('./pos.slot', './pos.unlabeled')
