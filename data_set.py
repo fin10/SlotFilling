@@ -93,6 +93,42 @@ class DataSet:
     def epoch(self):
         return self.__epoch
 
+    def ratio(self, ratio: float):
+        if ratio >= 1.0:
+            return self
+
+        slots = [0 for _ in range(len(self.__slot_vocab))]
+        for idx in range(self.size()):
+            labels = self.__labels[idx][:self.__lengths[idx]]
+            for label in labels:
+                slots[label] += 1
+
+        for idx in range(len(slots)):
+            slots[idx] = int(slots[idx] * ratio)
+
+        result = set()
+        counts = [0 for _ in range(len(self.__slot_vocab))]
+        for idx in range(self.size()):
+            satisfied = True
+            labels = self.__labels[idx][:self.__lengths[idx]]
+            for label in labels:
+                counts[label] += 1
+                if slots[label] < counts[label]:
+                    satisfied = False
+                    break
+            if satisfied:
+                result.add(idx)
+
+        new = DataSet(self.__slot_vocab)
+        new.__inputs = [self.__inputs[index] for index in result]
+        new.__lengths = [self.__lengths[index] for index in result]
+        new.__masks = [self.__masks[index] for index in result]
+        new.__labels = [self.__labels[index] for index in result]
+        new.__size = len(result)
+
+        return new
+
+
     def sample(self, size: int):
         if size == -1 or size == self.size():
             return self
@@ -108,7 +144,7 @@ class DataSet:
         return new
 
     def get_batch(self, size: int):
-        if size == -1 or size == self.size():
+        if size == -1 or size >= self.size():
             self.__epoch += 1
             return self
 
