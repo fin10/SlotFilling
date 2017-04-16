@@ -1,3 +1,5 @@
+import collections
+
 import numpy as np
 import tensorflow as tf
 
@@ -205,10 +207,10 @@ def rnn_model_fn(features, target, mode, params):
 
 
 def main(unused_args):
-    training_set = DataSet('./atis.slot', './atis.train').sample(400)
-    validation_set = DataSet('./atis.slot', './atis.dev')
-    test_set = DataSet('./atis.slot', './atis.test')
-    unlabeled_set = DataSet('./pos.slot', './pos.unlabeled')
+    training_set = DataSet('./data/atis.slot', './data/atis.train').sample(400)
+    validation_set = DataSet('./data/atis.slot', './data/atis.dev')
+    test_set = DataSet('./data/atis.slot', './data/atis.test')
+    unlabeled_set = DataSet('./data/pos.slot', './data/pos.unlabeled')
 
     print('# training_set (%d)' % training_set.size())
     print('# validation_set (%d)' % validation_set.size())
@@ -239,9 +241,9 @@ def main(unused_args):
         eval_steps=1,
         every_n_steps=50,
         metrics=validation_metrics,
-        # early_stopping_metric="loss",
-        # early_stopping_metric_minimize=True,
-        # early_stopping_rounds=500
+        early_stopping_metric="loss",
+        early_stopping_metric_minimize=True,
+        early_stopping_rounds=100
     )
 
     classifier.fit(
@@ -250,11 +252,28 @@ def main(unused_args):
         steps=1000
     )
 
-    accuracy_score = classifier.evaluate(
-        input_fn=lambda: input_fn(test_set, size=-1),
-        steps=1
-    )["accuracy"]
-    print('Accuracy: {0:f}'.format(accuracy_score))
+    predictions = classifier.predict(
+        input_fn=lambda: input_fn(test_set, size=-1)
+    )
+
+    correct = []
+    for i, p in enumerate(predictions):
+        target = test_set.labels()[i][:test_set.lengths()[i]]
+        prediction = list(p['predictions'])[:test_set.lengths()[i]]
+        for expected, actual in zip(target, prediction):
+            if expected is int(actual):
+                correct.append(test_set.get_slot(expected))
+    print('Accuracy: {0:f}'.format(len(correct) / sum(test_set.lengths())))
+
+    correct = dict(collections.Counter(correct).items())
+
+    for slot in test_set.slots():
+        if slot not in correct:
+            correct[slot] = 0
+
+    with open('./accuracy_pos.csv', 'w') as file:
+        for k, v in correct.items():
+            file.write('{},{}\n'.format(k, v))
 
 
 if __name__ == "__main__":

@@ -196,6 +196,15 @@ class DataSet:
     def num_classes(self):
         return len(self.__slot_vocab)
 
+    def get_slot(self, id: int):
+        for k, v in self.__slot_vocab.items():
+            if v == id:
+                return k
+        raise ValueError('{} not founds.'.format(id))
+
+    def slots(self):
+        return self.__slot_vocab
+
     @staticmethod
     def vocab_size():
         return len(DataSet.__word_vocab.vocabulary_)
