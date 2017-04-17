@@ -1,4 +1,5 @@
 import collections
+import os
 
 import numpy as np
 import tensorflow as tf
@@ -207,7 +208,10 @@ def rnn_model_fn(features, target, mode, params):
 
 
 def main(unused_args):
-    training_set = DataSet('./data/atis.slot', './data/atis.train').sample(400)
+    if not os.path.exists('./out'):
+        os.mkdir('./out')
+
+    training_set = DataSet('./data/atis.slot', './data/atis.train')
     validation_set = DataSet('./data/atis.slot', './data/atis.dev')
     test_set = DataSet('./data/atis.slot', './data/atis.test')
     unlabeled_set = DataSet('./data/pos.slot', './data/pos.unlabeled')
@@ -217,13 +221,20 @@ def main(unused_args):
     print('# test_set (%d)' % test_set.size())
     print('# unlabeled_set (%d)' % unlabeled_set.size())
 
+    slot_counter = training_set.get_slot_counter()
+    with open('./out/train.csv', mode='w') as file:
+        for k, v in slot_counter.items():
+            file.write('{},{}\n'.format(k, v))
+
     classifier = tf.contrib.learn.Estimator(
         model_fn=rnn_model_fn,
         params={
             'num_classes': training_set.num_classes(),
             'num_pos': unlabeled_set.num_classes(),
         },
-        config=tf.contrib.learn.RunConfig(save_checkpoints_secs=30),
+        config=tf.contrib.learn.RunConfig(
+            save_checkpoints_secs=30,
+            gpu_memory_fraction=0.1),
         model_dir='./model/'
     )
 

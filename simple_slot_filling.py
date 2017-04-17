@@ -1,4 +1,5 @@
 import collections
+import os
 
 import numpy as np
 import tensorflow as tf
@@ -120,6 +121,9 @@ def rnn_model_fn(features, target, mode, params):
 
 
 def main(unused_argv):
+    if not os.path.exists('./out'):
+        os.mkdir('./out')
+
     training_set = DataSet('./data/atis.slot', './data/atis.train')
     validation_set = DataSet('./data/atis.slot', './data/atis.dev')
     test_set = DataSet('./data/atis.slot', './data/atis.test')
@@ -128,12 +132,20 @@ def main(unused_argv):
     print('# validation_set (%d)' % validation_set.size())
     print('# test_set (%d)' % test_set.size())
 
+    slot_counter = training_set.get_slot_counter()
+    with open('./out/train.csv', mode='w') as file:
+        for k, v in slot_counter.items():
+            file.write('{},{}\n'.format(k, v))
+
     classifier = tf.contrib.learn.Estimator(
         model_fn=rnn_model_fn,
         params={
             'num_classes': training_set.num_classes()
         },
-        config=tf.contrib.learn.RunConfig(save_checkpoints_secs=30),
+        config=tf.contrib.learn.RunConfig(
+            save_checkpoints_secs=30,
+            gpu_memory_fraction=0.1
+        ),
         model_dir='./model/'
     )
 
@@ -181,7 +193,7 @@ def main(unused_argv):
         if slot not in correct:
             correct[slot] = 0
 
-    with open('./accuracy.csv', 'w') as file:
+    with open('./out/accuracy.csv', 'w') as file:
         for k, v in correct.items():
             file.write('{},{}\n'.format(k, v))
 

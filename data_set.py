@@ -128,7 +128,6 @@ class DataSet:
 
         return new
 
-
     def sample(self, size: int):
         if size == -1 or size == self.size():
             return self
@@ -237,6 +236,19 @@ class DataSet:
             if v == id:
                 return k
         raise ValueError('{} not founds.'.format(id))
+
+    def get_slot_counter(self):
+        slots = [0 for _ in range(len(self.__slot_vocab))]
+        for idx in range(self.size()):
+            labels = self.__labels[idx][:self.__lengths[idx]]
+            for label in labels:
+                slots[label] += 1
+
+        result = dict()
+        for idx, slot in enumerate(slots):
+            result[self.get_slot(idx)] = slot
+
+        return result
 
     def slots(self):
         return self.__slot_vocab
