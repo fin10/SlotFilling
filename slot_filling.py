@@ -1,4 +1,3 @@
-import collections
 import os
 
 import numpy as np
@@ -273,13 +272,10 @@ class SlotFilling:
             input_fn=lambda: SlotFilling.input_fn(test_set, size=-1)
         )
 
-        slot_counts = dict()
-        slot_no_match = dict()
-        slot_mismatch = dict()
-        for slot in test_set.slots().keys():
-            slot_counts[slot] = 0
-            slot_no_match[slot] = 0
-            slot_mismatch[slot] = 0
+        slot_correct = 0
+        slot_no_match = 0
+        slot_mismatch = 0
+        slot_over_match = 0
 
         for i, p in enumerate(predictions):
             target = test_set.labels()[i][:test_set.lengths()[i]]
@@ -287,17 +283,20 @@ class SlotFilling:
             for expected, actual in zip(target, prediction):
                 actual = int(actual)
                 if expected is actual:
-                    slot_counts[test_set.get_slot(expected)] += 1
+                    slot_correct += 1
                 elif test_set.get_slot(actual) is 'o':
-                    slot_no_match[test_set.get_slot(expected)] += 1
+                    slot_no_match += 1
+                elif test_set.get_slot(expected) is 'o':
+                    slot_over_match += 1
                 else:
-                    slot_mismatch[test_set.get_slot(expected)] += 1
+                    slot_mismatch += 1
 
         return {
-            'accuracy': sum(slot_counts.values()) / sum(test_set.lengths()),
-            'correct': collections.OrderedDict(sorted(slot_counts.items(), key=lambda x: x[0])),
-            'no_match': collections.OrderedDict(sorted(slot_no_match.items(), key=lambda x: x[0])),
-            'mismatch': collections.OrderedDict(sorted(slot_mismatch.items(), key=lambda x: x[0]))
+            'accuracy': slot_correct / sum(test_set.lengths()),
+            'correct': slot_correct,
+            'no_match': slot_no_match,
+            'mismatch': slot_mismatch,
+            'over_match': slot_over_match,
         }
 
 

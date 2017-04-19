@@ -11,78 +11,38 @@ experiments = [
         'name': 'labeled_20p',
         'training': './data/atis.train_0.2',
         'unlabeled': None
-    }, {
-        'name': 'labeled_30p',
-        'training': './data/atis.train_0.3',
-        'unlabeled': None
-    }, {
-        'name': 'labeled_40p',
-        'training': './data/atis.train_0.4',
-        'unlabeled': None
-    }, {
-        'name': 'labeled_50p',
-        'training': './data/atis.train_0.5',
-        'unlabeled': None
-    }, {
-        'name': 'labeled_60p',
-        'training': './data/atis.train_0.6',
-        'unlabeled': None
-    }, {
-        'name': 'labeled_70p',
-        'training': './data/atis.train_0.7',
-        'unlabeled': None
-    }, {
-        'name': 'labeled_80p',
-        'training': './data/atis.train_0.8',
-        'unlabeled': None
-    }, {
-        'name': 'labeled_90p',
-        'training': './data/atis.train_0.9',
-        'unlabeled': None
-    }, {
-        'name': 'labeled_100p',
-        'training': './data/atis.train_1.0',
-        'unlabeled': None
-    }, {
-        'name': 'unlabeled_10p',
-        'training': './data/atis.train_0.1',
-        'unlabeled': './data/pos.unlabeled'
-    }, {
-        'name': 'unlabeled_20p',
-        'training': './data/atis.train_0.2',
-        'unlabeled': './data/pos.unlabeled'
-    }, {
-        'name': 'unlabeled_30p',
-        'training': './data/atis.train_0.3',
-        'unlabeled': './data/pos.unlabeled'
-    }, {
-        'name': 'unlabeled_40p',
-        'training': './data/atis.train_0.4',
-        'unlabeled': './data/pos.unlabeled'
-    }, {
-        'name': 'unlabeled_50p',
-        'training': './data/atis.train_0.5',
-        'unlabeled': './data/pos.unlabeled'
-    }, {
-        'name': 'unlabeled_60p',
-        'training': './data/atis.train_0.6',
-        'unlabeled': './data/pos.unlabeled'
-    }, {
-        'name': 'unlabeled_70p',
-        'training': './data/atis.train_0.7',
-        'unlabeled': './data/pos.unlabeled'
-    }, {
-        'name': 'unlabeled_80p',
-        'training': './data/atis.train_0.8',
-        'unlabeled': './data/pos.unlabeled'
-    }, {
-        'name': 'unlabeled_90p',
-        'training': './data/atis.train_0.9',
-        'unlabeled': './data/pos.unlabeled'
-    }, {
-        'name': 'unlabeled_100p',
-        'training': './data/atis.train_1.0',
-        'unlabeled': './data/pos.unlabeled'
+        # }, {
+        #     'name': 'labeled_30p',
+        #     'training': './data/atis.train_0.3',
+        #     'unlabeled': None
+        # }, {
+        #     'name': 'labeled_40p',
+        #     'training': './data/atis.train_0.4',
+        #     'unlabeled': None
+        # }, {
+        #     'name': 'labeled_50p',
+        #     'training': './data/atis.train_0.5',
+        #     'unlabeled': None
+        # }, {
+        #     'name': 'labeled_60p',
+        #     'training': './data/atis.train_0.6',
+        #     'unlabeled': None
+        # }, {
+        #     'name': 'labeled_70p',
+        #     'training': './data/atis.train_0.7',
+        #     'unlabeled': None
+        # }, {
+        #     'name': 'labeled_80p',
+        #     'training': './data/atis.train_0.8',
+        #     'unlabeled': None
+        # }, {
+        #     'name': 'labeled_90p',
+        #     'training': './data/atis.train_0.9',
+        #     'unlabeled': None
+        # }, {
+        #     'name': 'labeled_100p',
+        #     'training': './data/atis.train_1.0',
+        #     'unlabeled': None
     },
 ]
 
@@ -91,6 +51,11 @@ if __name__ == '__main__':
         os.mkdir('./out')
 
     print('Experiments (%d)' % len(experiments))
+
+    corrects = []
+    no_matches = []
+    mismatches = []
+    over_matches = []
     for experiment in experiments:
         print('# %s' % experiment['name'])
         result = SlotFilling.run(
@@ -100,11 +65,17 @@ if __name__ == '__main__':
             test='./data/atis.test',
             unlabeled_slot='./data/pos.slot',
             unlabeled_train=experiment['unlabeled'],
-            steps=1000
+            steps=1
         )
-        print('# Accuracy: {0:f}'.format(result['accuracy']))
+        print('# Accuracy: {0:f}\n'.format(result['accuracy']))
 
-        with open(os.path.join('./out', experiment['name'] + '.csv'), mode='w') as output:
-            for k, v1, v2, v3 in zip(result['correct'].keys(), result['correct'].values(), result['no_match'].values(),
-                                     result['mismatch'].values()):
-                output.write('{},{},{},{}\n'.format(k, v1, v2, v3))
+        corrects.append(str(result['correct']))
+        no_matches.append(str(result['no_match']))
+        mismatches.append(str(result['mismatch']))
+        over_matches.append(str(result['over_match']))
+
+    with open(os.path.join('./out', 'labeled' + '.csv'), mode='w') as output:
+        output.write('correct,%s\n' % ','.join(corrects))
+        output.write('no_match,%s\n' % ','.join(no_matches))
+        output.write('mismatch,%s\n' % ','.join(mismatches))
+        output.write('over_match,%s\n' % ','.join(over_matches))
