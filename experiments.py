@@ -93,17 +93,18 @@ if __name__ == '__main__':
     print('Experiments (%d)' % len(experiments))
     for experiment in experiments:
         print('# %s' % experiment['name'])
-        accuracy, result = SlotFilling.run(
+        result = SlotFilling.run(
             slot='./data/atis.slot',
             train=experiment['training'],
             dev='./data/atis.dev',
             test='./data/atis.test',
             unlabeled_slot='./data/pos.slot',
             unlabeled_train=experiment['unlabeled'],
-            steps=1
+            steps=1000
         )
-        print('# Accuracy: {0:f}'.format(accuracy))
+        print('# Accuracy: {0:f}'.format(result['accuracy']))
 
         with open(os.path.join('./out', experiment['name'] + '.csv'), mode='w') as output:
-            for k, v in result.items():
-                output.write('{},{}\n'.format(k, v))
+            for k, v1, v2, v3 in zip(result['correct'].keys(), result['correct'].values(), result['no_match'].values(),
+                                     result['mismatch'].values()):
+                output.write('{},{},{},{}\n'.format(k, v1, v2, v3))

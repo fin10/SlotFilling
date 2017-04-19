@@ -1,10 +1,12 @@
 import collections
+import os
 
 import numpy as np
 import tensorflow as tf
 
 from data_set import DataSet
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 tf.logging.set_verbosity(tf.logging.INFO)
 EMBEDDING_DIMENSION = 128
 CELL_SIZE = 128
@@ -239,7 +241,7 @@ class SlotFilling:
             },
             config=tf.contrib.learn.RunConfig(
                 save_checkpoints_secs=30,
-                gpu_memory_fraction=0.1)
+                gpu_memory_fraction=0.5)
         )
 
         validation_metrics = {
@@ -272,18 +274,31 @@ class SlotFilling:
         )
 
         slot_counts = dict()
+        slot_no_match = dict()
+        slot_mismatch = dict()
         for slot in test_set.slots().keys():
             slot_counts[slot] = 0
+            slot_no_match[slot] = 0
+            slot_mismatch[slot] = 0
 
         for i, p in enumerate(predictions):
             target = test_set.labels()[i][:test_set.lengths()[i]]
             prediction = list(p['predictions'])[:test_set.lengths()[i]]
             for expected, actual in zip(target, prediction):
-                if expected is int(actual):
+                actual = int(actual)
+                if expected is actual:
                     slot_counts[test_set.get_slot(expected)] += 1
+                elif test_set.get_slot(actual) is 'o':
+                    slot_no_match[test_set.get_slot(expected)] += 1
+                else:
+                    slot_mismatch[test_set.get_slot(expected)] += 1
 
-        accuracy = sum(slot_counts.values()) / sum(test_set.lengths())
-        return accuracy, collections.OrderedDict(sorted(slot_counts.items(), key=lambda x: x[0]))
+        return {
+            'accuracy': sum(slot_counts.values()) / sum(test_set.lengths()),
+            'correct': collections.OrderedDict(sorted(slot_counts.items(), key=lambda x: x[0])),
+            'no_match': collections.OrderedDict(sorted(slot_no_match.items(), key=lambda x: x[0])),
+            'mismatch': collections.OrderedDict(sorted(slot_mismatch.items(), key=lambda x: x[0]))
+        }
 
 
 if __name__ == '__main__':
