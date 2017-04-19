@@ -7,9 +7,9 @@ from data_set import DataSet
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 tf.logging.set_verbosity(tf.logging.INFO)
-EMBEDDING_DIMENSION = 128
-CELL_SIZE = 128
-BATCH_SIZE = 256
+EMBEDDING_DIMENSION = 300
+CELL_SIZE = 300
+BATCH_SIZE = 512
 NUM_LAYERS = 1
 DROP_OUT = 0.5
 LEARNING_RATE = 0.001
@@ -259,7 +259,7 @@ class SlotFilling:
             metrics=validation_metrics,
             early_stopping_metric="loss",
             early_stopping_metric_minimize=True,
-            early_stopping_rounds=100
+            early_stopping_rounds=200
         )
 
         classifier.fit(
