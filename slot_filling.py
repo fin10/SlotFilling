@@ -7,42 +7,40 @@ from data_set import DataSet
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 tf.logging.set_verbosity(tf.logging.INFO)
-EMBEDDING_DIMENSION = 300
-CELL_SIZE = 300
-BATCH_SIZE = 512
+GPU_MEMORY = 0.1
+EMBEDDING_DIMENSION = 100
+CELL_SIZE = 100
+BATCH_SIZE = 128
 NUM_LAYERS = 1
 DROP_OUT = 0.5
 LEARNING_RATE = 0.001
 
 
 class SlotFilling:
+
     @staticmethod
-    def input_fn(dataset: DataSet, unlabeled_dataset: DataSet = None, size: int = BATCH_SIZE):
+    def input_fn(labeled: DataSet, unlabeled: DataSet = None, size: int = BATCH_SIZE):
         input_dict = {
         }
 
-        # unlabeled data
-        if unlabeled_dataset is not None and unlabeled_dataset.size() > 0:
-            unlabeled_dataset = unlabeled_dataset.get_batch(size)
-            input_dict['unlabeled_inputs'] = tf.constant(np.array(unlabeled_dataset.inputs()))
-            input_dict['unlabeled_sequence_length'] = tf.constant(unlabeled_dataset.lengths())
-            input_dict['unlabeled_mask'] = tf.constant(unlabeled_dataset.masks())
-            input_dict['unlabeled_target'] = tf.constant(unlabeled_dataset.labels())
-            input_dict['unlabeled_size'] = tf.constant(unlabeled_dataset.size())
-        else:
-            input_dict['unlabeled_inputs'] = tf.zeros([0, DataSet.MAX_SENTENCE_LENGTH], dtype=tf.int64)
-            input_dict['unlabeled_sequence_length'] = tf.zeros([0], dtype=tf.int32)
-            input_dict['unlabeled_mask'] = tf.zeros([0, DataSet.MAX_SENTENCE_LENGTH], dtype=tf.float32)
-            input_dict['unlabeled_target'] = tf.zeros([0, DataSet.MAX_SENTENCE_LENGTH], dtype=tf.int32)
-            input_dict['unlabeled_size'] = tf.constant(0)
+        if unlabeled is not None and unlabeled.size() == 0:
+            unlabeled = None
 
         # labeled data
-        dataset = dataset.get_batch(size)
-        input_dict['labeled_inputs'] = tf.constant(np.array(dataset.inputs()))
-        input_dict['labeled_sequence_length'] = tf.constant(dataset.lengths())
-        input_dict['labeled_mask'] = tf.constant(dataset.masks())
-        input_dict['labeled_size'] = tf.constant(dataset.size())
-        labels = tf.constant(dataset.labels())
+        labeled = labeled.get_batch(size)
+        input_dict['labeled_inputs'] = tf.constant(np.array(labeled.inputs()))
+        input_dict['labeled_sequence_length'] = tf.constant(labeled.lengths())
+        input_dict['labeled_mask'] = tf.constant(labeled.masks())
+        input_dict['labeled_size'] = tf.constant(labeled.size())
+        labels = tf.constant(labeled.labels())
+
+        # unlabeled data
+        unlabeled = unlabeled is None and labeled or unlabeled.get_batch(size)
+        input_dict['unlabeled_inputs'] = tf.constant(np.array(unlabeled.inputs()))
+        input_dict['unlabeled_sequence_length'] = tf.constant(unlabeled.lengths())
+        input_dict['unlabeled_mask'] = tf.constant(unlabeled.masks())
+        input_dict['unlabeled_size'] = tf.constant(unlabeled.size())
+        input_dict['unlabeled_target'] = tf.constant(unlabeled.labels())
 
         return input_dict, labels
 
@@ -60,17 +58,11 @@ class SlotFilling:
 
     @staticmethod
     def rnn_model_fn(features, target, mode, params):
-        num_classes = params['num_classes']
+        num_slot = params['num_slot']
         num_pos = params['num_pos']
-        drop_out = params['drop_out']
         embedding_dimension = params['embedding_dimension']
-        dropout = mode == tf.contrib.learn.ModeKeys.TRAIN and drop_out or 1.0
-
-        embeddings = tf.get_variable(
-            name='embeddings',
-            shape=[DataSet.vocab_size(), embedding_dimension],
-            initializer=tf.random_uniform_initializer(-1, 1, seed=123)
-        )
+        vocab_size = params['vocab_size']
+        drop_out = mode == tf.contrib.learn.ModeKeys.TRAIN and params['drop_out'] or 1.0
 
         # labeled data
         labeled_size = features['labeled_size']
@@ -86,19 +78,21 @@ class SlotFilling:
         unlabeled_mask = features['unlabeled_mask']
         unlabeled_target = features['unlabeled_target']
 
+        embeddings = tf.get_variable(
+            name='embeddings',
+            shape=[vocab_size, embedding_dimension],
+            initializer=tf.random_uniform_initializer(-1, 1, seed=123)
+        )
+
         # embeddings
         labeled_inputs = tf.nn.embedding_lookup(embeddings, labeled_inputs)
         unlabeled_inputs = tf.nn.embedding_lookup(embeddings, unlabeled_inputs)
 
-        if mode == tf.contrib.learn.ModeKeys.TRAIN:
-            inputs = tf.concat([labeled_inputs, unlabeled_inputs], 0)
-            length = tf.concat([labeled_length, unlabeled_length], 0)
-        else:
-            inputs = labeled_inputs
-            length = labeled_length
+        inputs = tf.concat([labeled_inputs, unlabeled_inputs], 0)
+        length = tf.concat([labeled_length, unlabeled_length], 0)
 
         cell = tf.contrib.rnn.GRUCell(CELL_SIZE)
-        cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=dropout)
+        cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=drop_out)
         cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
 
         outputs, state = tf.nn.bidirectional_dynamic_rnn(
@@ -112,7 +106,7 @@ class SlotFilling:
         with tf.variable_scope('labeled'):
             activations_fw = tf.contrib.layers.fully_connected(
                 inputs=outputs[0],
-                num_outputs=num_classes,
+                num_outputs=num_slot,
                 activation_fn=tf.nn.relu,
                 weights_initializer=tf.contrib.layers.xavier_initializer(seed=111),
                 scope='fully_connected_fw'
@@ -120,20 +114,18 @@ class SlotFilling:
 
             activations_bw = tf.contrib.layers.fully_connected(
                 inputs=outputs[1],
-                num_outputs=num_classes,
+                num_outputs=num_slot,
                 activation_fn=tf.nn.relu,
                 weights_initializer=tf.contrib.layers.xavier_initializer(seed=156),
                 scope='fully_connected_bw'
             )
 
             labeled_activations = activations_fw + activations_bw
-            labeled_prediction = tf.reshape(labeled_activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_classes])
+            labeled_prediction = tf.reshape(labeled_activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_slot])
+            labeled_prediction = tf.slice(labeled_prediction, [0, 0, 0],
+                                          [labeled_size, DataSet.MAX_SENTENCE_LENGTH, num_slot])
 
-            if mode == tf.contrib.learn.ModeKeys.TRAIN:
-                labeled_prediction = tf.slice(labeled_prediction, [0, 0, 0],
-                                              [labeled_size, DataSet.MAX_SENTENCE_LENGTH, num_classes])
-
-            labeled_target = tf.one_hot(labeled_target, num_classes)
+            labeled_target = tf.one_hot(labeled_target, num_slot)
             labeled_loss = tf.losses.softmax_cross_entropy(
                 onehot_labels=labeled_target,
                 logits=labeled_prediction,
@@ -219,10 +211,10 @@ class SlotFilling:
         )
 
     @classmethod
-    def run(cls, slot, train, dev, test, unlabeled_slot, unlabeled_train, steps):
-        training_set = DataSet(slot, train)
-        validation_set = DataSet(slot, dev)
-        test_set = DataSet(slot, test)
+    def run(cls, dev, test, labeled_slot, labeled_train, unlabeled_slot, unlabeled_train, steps):
+        training_set = DataSet(labeled_slot, labeled_train)
+        validation_set = DataSet(labeled_slot, dev)
+        test_set = DataSet(labeled_slot, test)
         unlabeled_set = DataSet(unlabeled_slot, unlabeled_train)
 
         print('# training_set (%d)' % training_set.size())
@@ -233,14 +225,15 @@ class SlotFilling:
         classifier = tf.contrib.learn.Estimator(
             model_fn=SlotFilling.rnn_model_fn,
             params={
-                'num_classes': training_set.num_classes(),
+                'num_slot': training_set.num_classes(),
                 'num_pos': unlabeled_set.num_classes(),
                 'drop_out': DROP_OUT,
-                'embedding_dimension': EMBEDDING_DIMENSION
+                'embedding_dimension': EMBEDDING_DIMENSION,
+                'vocab_size': DataSet.vocab_size()
             },
             config=tf.contrib.learn.RunConfig(
-                save_checkpoints_secs=30,
-                gpu_memory_fraction=0.5)
+                gpu_memory_fraction=GPU_MEMORY
+            )
         )
 
         validation_metrics = {
