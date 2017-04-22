@@ -31,8 +31,10 @@ class SlotFilling:
         input_dict['labeled_inputs'] = tf.constant(np.array(labeled.inputs()))
         input_dict['labeled_sequence_length'] = tf.constant(labeled.lengths())
         input_dict['labeled_mask'] = tf.constant(labeled.masks())
-        input_dict['labeled_size'] = tf.constant(labeled.size())
         labels = tf.constant(labeled.labels())
+
+        size = labeled.size()
+        input_dict['size'] = tf.constant(labeled.size())
 
         # unlabeled data
         unlabeled = unlabeled is None and labeled or unlabeled.get_batch(size)
@@ -62,17 +64,18 @@ class SlotFilling:
         num_pos = params['num_pos']
         embedding_dimension = params['embedding_dimension']
         vocab_size = params['vocab_size']
+        unlabeled = params['unlabeled']
         drop_out = mode == tf.contrib.learn.ModeKeys.TRAIN and params['drop_out'] or 1.0
 
+        size = features['size']
+
         # labeled data
-        labeled_size = features['labeled_size']
         labeled_inputs = features['labeled_inputs']
         labeled_length = features['labeled_sequence_length']
         labeled_mask = features['labeled_mask']
         labeled_target = target
 
         # unlabeled data
-        unlabeled_size = features['unlabeled_size']
         unlabeled_inputs = features['unlabeled_inputs']
         unlabeled_length = features['unlabeled_sequence_length']
         unlabeled_mask = features['unlabeled_mask']
@@ -103,9 +106,40 @@ class SlotFilling:
             dtype=tf.float32
         )
 
+        outputs_fw = outputs[0]
+        outputs_bw = outputs[1]
+
+        labeled_outputs, unlabeled_outputs = tf.split(outputs_fw,
+                                                      num_or_size_splits=2,
+                                                      axis=0
+                                                      )
+
+        outputs_fw = tf.concat([labeled_outputs, unlabeled_outputs], 1)
+        outputs_fw = tf.contrib.layers.fully_connected(
+            inputs=outputs_fw,
+            num_outputs=CELL_SIZE,
+            activation_fn=tf.nn.relu,
+            weights_initializer=tf.contrib.layers.xavier_initializer(seed=100),
+            scope='fully_connected_fw'
+        )
+
+        labeled_outputs, unlabeled_outputs = tf.split(outputs_bw,
+                                                      num_or_size_splits=2,
+                                                      axis=0
+                                                      )
+
+        outputs_bw = tf.concat([labeled_outputs, unlabeled_outputs], 1)
+        outputs_bw = tf.contrib.layers.fully_connected(
+            inputs=outputs_bw,
+            num_outputs=CELL_SIZE,
+            activation_fn=tf.nn.relu,
+            weights_initializer=tf.contrib.layers.xavier_initializer(seed=101),
+            scope='fully_connected_fw'
+        )
+
         with tf.variable_scope('labeled'):
             activations_fw = tf.contrib.layers.fully_connected(
-                inputs=outputs[0],
+                inputs=outputs_fw,
                 num_outputs=num_slot,
                 activation_fn=tf.nn.relu,
                 weights_initializer=tf.contrib.layers.xavier_initializer(seed=111),
@@ -113,7 +147,7 @@ class SlotFilling:
             )
 
             activations_bw = tf.contrib.layers.fully_connected(
-                inputs=outputs[1],
+                inputs=outputs_bw,
                 num_outputs=num_slot,
                 activation_fn=tf.nn.relu,
                 weights_initializer=tf.contrib.layers.xavier_initializer(seed=156),
@@ -121,9 +155,9 @@ class SlotFilling:
             )
 
             labeled_activations = activations_fw + activations_bw
-            labeled_prediction = tf.reshape(labeled_activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_slot])
-            labeled_prediction = tf.slice(labeled_prediction, [0, 0, 0],
-                                          [labeled_size, DataSet.MAX_SENTENCE_LENGTH, num_slot])
+            labeled_prediction = tf.split(labeled_activations,
+                                          num_or_size_splits=2,
+                                          axis=1)[0]
 
             labeled_target = tf.one_hot(labeled_target, num_slot)
             labeled_loss = tf.losses.softmax_cross_entropy(
@@ -134,9 +168,9 @@ class SlotFilling:
 
         with tf.variable_scope('unlabeled'):
             unlabeled_loss = 0
-            if mode == tf.contrib.learn.ModeKeys.TRAIN:
+            if unlabeled and mode == tf.contrib.learn.ModeKeys.TRAIN:
                 activations_fw = tf.contrib.layers.fully_connected(
-                    inputs=outputs[0],
+                    inputs=outputs_fw,
                     num_outputs=num_pos,
                     activation_fn=tf.nn.relu,
                     weights_initializer=tf.contrib.layers.xavier_initializer(seed=211),
@@ -144,7 +178,7 @@ class SlotFilling:
                 )
 
                 activations_bw = tf.contrib.layers.fully_connected(
-                    inputs=outputs[1],
+                    inputs=outputs_bw,
                     num_outputs=num_pos,
                     activation_fn=tf.nn.relu,
                     weights_initializer=tf.contrib.layers.xavier_initializer(seed=256),
@@ -152,18 +186,16 @@ class SlotFilling:
                 )
 
                 unlabeled_activations = activations_fw + activations_bw
-                unlabeled_prediction = tf.reshape(unlabeled_activations, [-1, DataSet.MAX_SENTENCE_LENGTH, num_pos])
-                unlabeled_prediction = tf.slice(unlabeled_prediction, [labeled_size, 0, 0],
-                                                [unlabeled_size, DataSet.MAX_SENTENCE_LENGTH, num_pos])
+                unlabeled_prediction = tf.split(unlabeled_activations,
+                                                num_or_size_splits=2,
+                                                axis=1)[1]
 
                 unlabeled_target = tf.one_hot(unlabeled_target, num_pos)
-                unlabeled_loss = tf.cond(unlabeled_size > tf.constant(0),
-                                         lambda: tf.losses.softmax_cross_entropy(
-                                             onehot_labels=unlabeled_target,
-                                             logits=unlabeled_prediction,
-                                             weights=unlabeled_mask
-                                         ),
-                                         lambda: tf.constant(0, dtype=tf.float32))
+                unlabeled_loss = tf.losses.softmax_cross_entropy(
+                    onehot_labels=unlabeled_target,
+                    logits=unlabeled_prediction,
+                    weights=unlabeled_mask
+                )
 
         loss = labeled_loss + unlabeled_loss * SlotFilling.coefficient_balancing(tf.constant(300),
                                                                                  tf.constant(700),
@@ -229,11 +261,14 @@ class SlotFilling:
                 'num_pos': unlabeled_set.num_classes(),
                 'drop_out': DROP_OUT,
                 'embedding_dimension': EMBEDDING_DIMENSION,
-                'vocab_size': DataSet.vocab_size()
+                'vocab_size': DataSet.vocab_size(),
+                'unlabeled': unlabeled_set.size() > 0
             },
             config=tf.contrib.learn.RunConfig(
-                gpu_memory_fraction=GPU_MEMORY
-            )
+                gpu_memory_fraction=GPU_MEMORY,
+                save_checkpoints_secs=30,
+            ),
+            # model_dir='./model'
         )
 
         validation_metrics = {
