@@ -32,10 +32,8 @@ class SlotFilling:
         input_dict['labeled_mask'] = tf.constant(labeled.masks())
         labels = tf.constant(labeled.labels())
 
-        size = labeled.size()
-
         # unlabeled data
-        unlabeled = unlabeled is None and labeled or unlabeled.get_batch(size)
+        unlabeled = unlabeled is None and labeled or unlabeled.get_batch(labeled.size())
         input_dict['unlabeled_inputs'] = tf.constant(np.array(unlabeled.inputs()))
         input_dict['unlabeled_sequence_length'] = tf.constant(unlabeled.lengths())
         input_dict['unlabeled_mask'] = tf.constant(unlabeled.masks())
@@ -87,53 +85,43 @@ class SlotFilling:
         labeled_inputs = tf.nn.embedding_lookup(embeddings, labeled_inputs)
         unlabeled_inputs = tf.nn.embedding_lookup(embeddings, unlabeled_inputs)
 
-        inputs = tf.concat([labeled_inputs, unlabeled_inputs], 0)
-        length = tf.concat([labeled_length, unlabeled_length], 0)
+        with tf.variable_scope('CNN'):
+            inputs = tf.stack([labeled_inputs, unlabeled_inputs], axis=1)
+            conv = tf.contrib.layers.convolution2d(
+                inputs=inputs,
+                num_outputs=EMBEDDING_DIMENSION,
+                kernel_size=[2, 3],
+                stride=[2, 1],
+                padding='SAME',
+                activation_fn=tf.nn.relu,
+                weights_initializer=tf.contrib.layers.xavier_initializer(),
+            )
+
+            # pool = tf.nn.max_pool(
+            #     value=conv,
+            #     ksize=None,
+            #     strides=None,
+            #     padding='SAME'
+            # )
+            h = conv
+            h = tf.reshape(h, [-1, DataSet.MAX_SENTENCE_LENGTH, EMBEDDING_DIMENSION])
 
         cell = tf.contrib.rnn.GRUCell(CELL_SIZE)
         cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=drop_out)
         cell = tf.contrib.rnn.MultiRNNCell([cell] * NUM_LAYERS)
 
-        outputs, state = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw=cell,
-            cell_bw=cell,
-            inputs=inputs,
-            sequence_length=length,
-            dtype=tf.float32
-        )
-
-        outputs_fw = outputs[0]
-        outputs_bw = outputs[1]
-
-        labeled_outputs, unlabeled_outputs = tf.split(outputs_fw,
-                                                      num_or_size_splits=2,
-                                                      axis=0
-                                                      )
-
-        outputs_fw = tf.concat([labeled_outputs, unlabeled_outputs], 1)
-        outputs_fw = tf.contrib.layers.fully_connected(
-            inputs=outputs_fw,
-            num_outputs=CELL_SIZE,
-            activation_fn=tf.nn.relu,
-            weights_initializer=tf.contrib.layers.xavier_initializer(),
-            scope='fully_connected_fw'
-        )
-
-        labeled_outputs, unlabeled_outputs = tf.split(outputs_bw,
-                                                      num_or_size_splits=2,
-                                                      axis=0
-                                                      )
-
-        outputs_bw = tf.concat([labeled_outputs, unlabeled_outputs], 1)
-        outputs_bw = tf.contrib.layers.fully_connected(
-            inputs=outputs_bw,
-            num_outputs=CELL_SIZE,
-            activation_fn=tf.nn.relu,
-            weights_initializer=tf.contrib.layers.xavier_initializer(),
-            scope='fully_connected_fw'
-        )
-
         with tf.variable_scope('labeled'):
+            outputs, state = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw=cell,
+                cell_bw=cell,
+                inputs=h,
+                sequence_length=labeled_length,
+                dtype=tf.float32
+            )
+
+            outputs_fw = outputs[0]
+            outputs_bw = outputs[1]
+
             activations_fw = tf.contrib.layers.fully_connected(
                 inputs=outputs_fw,
                 num_outputs=num_slot,
@@ -150,10 +138,7 @@ class SlotFilling:
                 scope='fully_connected_bw'
             )
 
-            labeled_activations = activations_fw + activations_bw
-            labeled_prediction = tf.split(labeled_activations,
-                                          num_or_size_splits=2,
-                                          axis=1)[0]
+            labeled_prediction = activations_fw + activations_bw
 
             labeled_target = tf.one_hot(labeled_target, num_slot)
             labeled_loss = tf.losses.softmax_cross_entropy(
@@ -165,6 +150,17 @@ class SlotFilling:
         with tf.variable_scope('unlabeled'):
             unlabeled_loss = 0
             if unlabeled and mode == tf.contrib.learn.ModeKeys.TRAIN:
+                outputs, state = tf.nn.bidirectional_dynamic_rnn(
+                    cell_fw=cell,
+                    cell_bw=cell,
+                    inputs=h,
+                    sequence_length=unlabeled_length,
+                    dtype=tf.float32
+                )
+
+                outputs_fw = outputs[0]
+                outputs_bw = outputs[1]
+
                 activations_fw = tf.contrib.layers.fully_connected(
                     inputs=outputs_fw,
                     num_outputs=num_pos,
@@ -181,10 +177,7 @@ class SlotFilling:
                     scope='fully_connected_bw'
                 )
 
-                unlabeled_activations = activations_fw + activations_bw
-                unlabeled_prediction = tf.split(unlabeled_activations,
-                                                num_or_size_splits=2,
-                                                axis=1)[1]
+                unlabeled_prediction = activations_fw + activations_bw
 
                 unlabeled_target = tf.one_hot(unlabeled_target, num_pos)
                 unlabeled_loss = tf.losses.softmax_cross_entropy(
