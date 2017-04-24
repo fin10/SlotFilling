@@ -5,24 +5,34 @@ from slot_filling import SlotFilling
 
 experiments = [{
     'labeled_train': './data/atis.train_0.1',
+    'gpu_memory': 0.2,
 }, {
     'labeled_train': './data/atis.train_0.2',
+    'gpu_memory': 0.4,
 }, {
     'labeled_train': './data/atis.train_0.3',
+    'gpu_memory': 0.4,
 }, {
     'labeled_train': './data/atis.train_0.4',
+    'gpu_memory': 0.6,
 }, {
     'labeled_train': './data/atis.train_0.5',
+    'gpu_memory': 0.6,
 }, {
     'labeled_train': './data/atis.train_0.6',
+    'gpu_memory': 0.7,
 }, {
     'labeled_train': './data/atis.train_0.7',
+    'gpu_memory': 0.8,
 }, {
     'labeled_train': './data/atis.train_0.8',
+    'gpu_memory': 0.9,
 }, {
     'labeled_train': './data/atis.train_0.9',
+    'gpu_memory': 1.0,
 }, {
     'labeled_train': './data/atis.train_1.0',
+    'gpu_memory': 1.0,
 }]
 
 if __name__ == '__main__':
@@ -58,6 +68,7 @@ if __name__ == '__main__':
             labeled_train=experiment['labeled_train'],
             unlabeled_slot=experiment['unlabeled_slot'],
             unlabeled_train=experiment['unlabeled_train'],
+            gpu_memory=experiment['gpu_memory'],
             steps=1000
         )
         print('# Accuracy: {0:f}\n'.format(result['accuracy']))
@@ -68,14 +79,15 @@ if __name__ == '__main__':
         mismatches.append(str(result['mismatch']))
         over_matches.append(str(result['over_match']))
 
-        with open(os.path.join('./out', '{}-{}.csv'.format(experiment['name'], idx)), mode='w') as output:
+        with open(os.path.join('./out', '{}-{}.csv'.format(experiment['name'], time.strftime('%H-%M-%S'))),
+                  mode='w') as output:
             output.write('accuracy,%s\n' % ','.join(accuracies))
             output.write('correct,%s\n' % ','.join(corrects))
             output.write('no_match,%s\n' % ','.join(no_matches))
             output.write('mismatch,%s\n' % ','.join(mismatches))
             output.write('over_match,%s\n' % ','.join(over_matches))
 
-    with open(os.path.join('./out', '{}_{}.csv'.format(default['name'], time.strftime('%H-%M-%S'))),
+    with open(os.path.join('./out', '{}_{}.csv'.format(default['name'], 'total')),
               mode='w') as output:
         output.write('accuracy,%s\n' % ','.join(accuracies))
         output.write('correct,%s\n' % ','.join(corrects))

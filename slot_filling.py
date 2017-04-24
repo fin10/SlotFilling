@@ -7,10 +7,9 @@ from data_set import DataSet
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 tf.logging.set_verbosity(tf.logging.INFO)
-GPU_MEMORY = 0.1
 EMBEDDING_DIMENSION = 100
 CELL_SIZE = 100
-BATCH_SIZE = 128
+BATCH_SIZE = 4096
 NUM_LAYERS = 1
 DROP_OUT = 0.5
 LEARNING_RATE = 0.001
@@ -34,7 +33,6 @@ class SlotFilling:
         labels = tf.constant(labeled.labels())
 
         size = labeled.size()
-        input_dict['size'] = tf.constant(labeled.size())
 
         # unlabeled data
         unlabeled = unlabeled is None and labeled or unlabeled.get_batch(size)
@@ -67,8 +65,6 @@ class SlotFilling:
         unlabeled = params['unlabeled']
         drop_out = mode == tf.contrib.learn.ModeKeys.TRAIN and params['drop_out'] or 1.0
 
-        size = features['size']
-
         # labeled data
         labeled_inputs = features['labeled_inputs']
         labeled_length = features['labeled_sequence_length']
@@ -84,7 +80,7 @@ class SlotFilling:
         embeddings = tf.get_variable(
             name='embeddings',
             shape=[vocab_size, embedding_dimension],
-            initializer=tf.random_uniform_initializer(-1, 1, seed=123)
+            initializer=tf.random_uniform_initializer(-1, 1)
         )
 
         # embeddings
@@ -119,7 +115,7 @@ class SlotFilling:
             inputs=outputs_fw,
             num_outputs=CELL_SIZE,
             activation_fn=tf.nn.relu,
-            weights_initializer=tf.contrib.layers.xavier_initializer(seed=100),
+            weights_initializer=tf.contrib.layers.xavier_initializer(),
             scope='fully_connected_fw'
         )
 
@@ -133,7 +129,7 @@ class SlotFilling:
             inputs=outputs_bw,
             num_outputs=CELL_SIZE,
             activation_fn=tf.nn.relu,
-            weights_initializer=tf.contrib.layers.xavier_initializer(seed=101),
+            weights_initializer=tf.contrib.layers.xavier_initializer(),
             scope='fully_connected_fw'
         )
 
@@ -142,7 +138,7 @@ class SlotFilling:
                 inputs=outputs_fw,
                 num_outputs=num_slot,
                 activation_fn=tf.nn.relu,
-                weights_initializer=tf.contrib.layers.xavier_initializer(seed=111),
+                weights_initializer=tf.contrib.layers.xavier_initializer(),
                 scope='fully_connected_fw'
             )
 
@@ -150,7 +146,7 @@ class SlotFilling:
                 inputs=outputs_bw,
                 num_outputs=num_slot,
                 activation_fn=tf.nn.relu,
-                weights_initializer=tf.contrib.layers.xavier_initializer(seed=156),
+                weights_initializer=tf.contrib.layers.xavier_initializer(),
                 scope='fully_connected_bw'
             )
 
@@ -173,7 +169,7 @@ class SlotFilling:
                     inputs=outputs_fw,
                     num_outputs=num_pos,
                     activation_fn=tf.nn.relu,
-                    weights_initializer=tf.contrib.layers.xavier_initializer(seed=211),
+                    weights_initializer=tf.contrib.layers.xavier_initializer(),
                     scope='fully_connected_fw'
                 )
 
@@ -181,7 +177,7 @@ class SlotFilling:
                     inputs=outputs_bw,
                     num_outputs=num_pos,
                     activation_fn=tf.nn.relu,
-                    weights_initializer=tf.contrib.layers.xavier_initializer(seed=256),
+                    weights_initializer=tf.contrib.layers.xavier_initializer(),
                     scope='fully_connected_bw'
                 )
 
@@ -197,11 +193,11 @@ class SlotFilling:
                     weights=unlabeled_mask
                 )
 
-        loss = labeled_loss + unlabeled_loss * SlotFilling.coefficient_balancing(tf.constant(300),
-                                                                                 tf.constant(700),
-                                                                                 tf.constant(3),
-                                                                                 tf.to_int32(
-                                                                                     tf.train.get_global_step() / 10))
+        balancing = SlotFilling.coefficient_balancing(100, 600, 3, tf.train.get_global_step())
+        loss = labeled_loss + unlabeled_loss * balancing
+        tf.summary.scalar('balancing', balancing)
+        tf.summary.scalar('labeled_loss', labeled_loss)
+        tf.summary.scalar('unlabeled_loss', unlabeled_loss)
 
         learning_rate = tf.train.exponential_decay(
             learning_rate=LEARNING_RATE,
@@ -243,7 +239,7 @@ class SlotFilling:
         )
 
     @classmethod
-    def run(cls, dev, test, labeled_slot, labeled_train, unlabeled_slot, unlabeled_train, steps):
+    def run(cls, dev, test, labeled_slot, labeled_train, unlabeled_slot, unlabeled_train, steps, gpu_memory):
         training_set = DataSet(labeled_slot, labeled_train)
         validation_set = DataSet(labeled_slot, dev)
         test_set = DataSet(labeled_slot, test)
@@ -265,7 +261,7 @@ class SlotFilling:
                 'unlabeled': unlabeled_set.size() > 0
             },
             config=tf.contrib.learn.RunConfig(
-                gpu_memory_fraction=GPU_MEMORY,
+                gpu_memory_fraction=gpu_memory,
                 save_checkpoints_secs=30,
             ),
             # model_dir='./model'
