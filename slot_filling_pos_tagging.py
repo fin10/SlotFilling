@@ -134,16 +134,12 @@ class SlotFilling:
             weights=unlabeled_masks
         )
 
+        labeled_predictions = tf.argmax(labeled_predictions, 2)
+
         if classification == 'slot_filling':
             loss = labeled_loss
-            predictions = tf.argmax(labeled_predictions, 2),
-            masks = labeled_masks
-            target = labeled_target
         else:
             loss = unlabeled_loss
-            predictions = tf.argmax(unlabeled_predictions, 2),
-            masks = unlabeled_masks
-            target = unlabeled_target
 
         learning_rate = tf.train.exponential_decay(
             learning_rate=LEARNING_RATE,
@@ -165,16 +161,16 @@ class SlotFilling:
         if mode != tf.contrib.learn.ModeKeys.INFER:
             eval_metric_ops = {
                 'accuracy': tf.metrics.accuracy(
-                    labels=target,
-                    predictions=predictions,
-                    weights=masks
+                    labels=labeled_target,
+                    predictions=labeled_predictions,
+                    weights=labeled_masks
                 )
             }
 
         return tf.contrib.learn.ModelFnOps(
             mode=mode,
             predictions={
-                'predictions': predictions
+                'predictions': labeled_predictions
             },
             loss=loss,
             train_op=train_op,
@@ -195,6 +191,12 @@ class SlotFilling:
 
         classifier = tf.contrib.learn.Estimator(
             model_fn=SlotFilling.rnn_model_fn,
+            model_dir='./model',
+            config=tf.contrib.learn.RunConfig(
+                gpu_memory_fraction=gpu_memory,
+                tf_random_seed=10,
+                save_checkpoints_secs=30,
+            ),
             params={
                 'num_slot': training_set.num_classes(),
                 'num_pos': unlabeled_set.num_classes(),
@@ -203,12 +205,6 @@ class SlotFilling:
                 'vocab_size': DataSet.vocab_size(),
                 'classification': CLASSIFICATION
             },
-            config=tf.contrib.learn.RunConfig(
-                gpu_memory_fraction=gpu_memory,
-                tf_random_seed=10,
-                save_checkpoints_secs=30,
-            ),
-            model_dir='./model'
         )
 
         validation_metrics = {
