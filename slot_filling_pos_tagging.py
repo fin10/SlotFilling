@@ -13,7 +13,7 @@ BATCH_SIZE = 3500
 NUM_LAYERS = 1
 DROP_OUT = 0.5
 LEARNING_RATE = 0.001
-CLASSIFICATION = ['pos', 'slot_filling'][0]
+THRESHOLD = 500
 
 
 class SlotFilling:
@@ -44,7 +44,6 @@ class SlotFilling:
         num_pos = params['num_pos']
         embedding_dimension = params['embedding_dimension']
         vocab_size = params['vocab_size']
-        classification = params['classification']
         drop_out = mode == tf.contrib.learn.ModeKeys.TRAIN and params['drop_out'] or 1.0
 
         # labeled data
@@ -69,51 +68,44 @@ class SlotFilling:
         labeled_inputs = tf.nn.embedding_lookup(embeddings, labeled_inputs)
         unlabeled_inputs = tf.nn.embedding_lookup(embeddings, unlabeled_inputs)
 
-        def get_activations(inputs, lengths, scope, trainable=True):
-            cell_fw = tf.contrib.rnn.GRUCell(CELL_SIZE)
-            cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, output_keep_prob=drop_out)
+        inputs = tf.concat([labeled_inputs, unlabeled_inputs], axis=0)
+        lengths = tf.concat([labeled_lengths, unlabeled_lengths], axis=0)
 
-            cell_bw = tf.contrib.rnn.GRUCell(CELL_SIZE)
-            cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, output_keep_prob=drop_out)
+        cell_fw = tf.contrib.rnn.GRUCell(CELL_SIZE)
+        cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, output_keep_prob=drop_out)
 
-            outputs, _ = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw=cell_fw,
-                cell_bw=cell_bw,
-                inputs=inputs,
-                sequence_length=lengths,
-                dtype=tf.float32,
-                scope='rnn_' + scope
-            )
+        cell_bw = tf.contrib.rnn.GRUCell(CELL_SIZE)
+        cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, output_keep_prob=drop_out)
 
-            activations_fw = tf.contrib.layers.fully_connected(
-                inputs=outputs[0],
-                num_outputs=CELL_SIZE,
-                trainable=trainable,
-                scope='nn_fw_' + scope
-            )
+        outputs, _ = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw=cell_fw,
+            cell_bw=cell_bw,
+            inputs=inputs,
+            sequence_length=lengths,
+            dtype=tf.float32
+        )
 
-            activations_bw = tf.contrib.layers.fully_connected(
-                inputs=outputs[1],
-                num_outputs=CELL_SIZE,
-                trainable=trainable,
-                scope='nn_bw_' + scope
-            )
+        activations_fw = tf.contrib.layers.fully_connected(
+            inputs=outputs[0],
+            num_outputs=CELL_SIZE,
+        )
 
-            return activations_fw + activations_bw
+        activations_bw = tf.contrib.layers.fully_connected(
+            inputs=outputs[1],
+            num_outputs=CELL_SIZE,
+        )
 
-        labeled_activations = get_activations(labeled_inputs, labeled_lengths,
-                                              scope=classification == 'slot_filling' and 'real' or 'dummy',
-                                              trainable=classification == 'slot_filling')
-        unlabeled_activations = get_activations(unlabeled_inputs, unlabeled_lengths,
-                                                scope=classification == 'pos' and 'real' or 'dummy',
-                                                trainable=classification == 'pos')
-
+        activations = activations_fw + activations_bw
         labeled_predictions = tf.contrib.layers.fully_connected(
-            inputs=labeled_activations,
+            inputs=activations,
             num_outputs=num_slot,
-            trainable=classification == 'slot_filling',
             scope='nn_labeled',
         )
+
+        labeled_predictions, _ = tf.split(value=labeled_predictions,
+                                          num_or_size_splits=[tf.shape(labeled_inputs)[0],
+                                                              tf.shape(unlabeled_inputs)[0]],
+                                          axis=0)
 
         labeled_loss = tf.losses.softmax_cross_entropy(
             onehot_labels=tf.one_hot(labeled_target, num_slot),
@@ -122,11 +114,15 @@ class SlotFilling:
         )
 
         unlabeled_predictions = tf.contrib.layers.fully_connected(
-            inputs=unlabeled_activations,
+            inputs=activations,
             num_outputs=num_pos,
-            trainable=classification == 'pos',
             scope='nn_unlabeled',
         )
+
+        _, unlabeled_predictions = tf.split(value=unlabeled_predictions,
+                                            num_or_size_splits=[tf.shape(labeled_inputs)[0],
+                                                                tf.shape(unlabeled_inputs)[0]],
+                                            axis=0)
 
         unlabeled_loss = tf.losses.softmax_cross_entropy(
             onehot_labels=tf.one_hot(unlabeled_target, num_pos),
@@ -134,12 +130,14 @@ class SlotFilling:
             weights=unlabeled_masks
         )
 
-        labeled_predictions = tf.argmax(labeled_predictions, 2)
+        ratio = tf.case({
+            tf.contrib.framework.get_global_step() > THRESHOLD: lambda: tf.constant(1, dtype=tf.float32)
+        }, default=lambda: tf.constant(0, dtype=tf.float32))
+        tf.summary.scalar('ratio', ratio)
 
-        if classification == 'slot_filling':
-            loss = labeled_loss
-        else:
-            loss = unlabeled_loss
+        loss = ratio * labeled_loss + (1 - ratio) * unlabeled_loss
+
+        labeled_predictions = tf.argmax(labeled_predictions, 2)
 
         learning_rate = tf.train.exponential_decay(
             learning_rate=LEARNING_RATE,
@@ -202,8 +200,7 @@ class SlotFilling:
                 'num_pos': unlabeled_set.num_classes(),
                 'drop_out': DROP_OUT,
                 'embedding_dimension': EMBEDDING_DIMENSION,
-                'vocab_size': DataSet.vocab_size(),
-                'classification': CLASSIFICATION
+                'vocab_size': DataSet.vocab_size()
             },
         )
 
