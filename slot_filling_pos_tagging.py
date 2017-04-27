@@ -69,79 +69,81 @@ class SlotFilling:
         labeled_inputs = tf.nn.embedding_lookup(embeddings, labeled_inputs)
         unlabeled_inputs = tf.nn.embedding_lookup(embeddings, unlabeled_inputs)
 
-        if mode != tf.contrib.learn.ModeKeys.TRAIN or classification == 'pos':
-            inputs = unlabeled_inputs
-            lengths = unlabeled_lengths
-        else:
-            inputs = labeled_inputs
-            lengths = labeled_lengths
+        def get_activations(inputs, lengths, scope, trainable=True):
+            cell_fw = tf.contrib.rnn.GRUCell(CELL_SIZE)
+            cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, output_keep_prob=drop_out)
 
-        cell_fw = tf.contrib.rnn.GRUCell(CELL_SIZE)
-        cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, output_keep_prob=drop_out)
+            cell_bw = tf.contrib.rnn.GRUCell(CELL_SIZE)
+            cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, output_keep_prob=drop_out)
 
-        cell_bw = tf.contrib.rnn.GRUCell(CELL_SIZE)
-        cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, output_keep_prob=drop_out)
+            outputs, _ = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw=cell_fw,
+                cell_bw=cell_bw,
+                inputs=inputs,
+                sequence_length=lengths,
+                dtype=tf.float32,
+                scope='rnn_' + scope
+            )
 
-        outputs, state = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw=cell_fw,
-            cell_bw=cell_bw,
-            inputs=inputs,
-            sequence_length=lengths,
-            dtype=tf.float32
+            activations_fw = tf.contrib.layers.fully_connected(
+                inputs=outputs[0],
+                num_outputs=CELL_SIZE,
+                trainable=trainable,
+                scope='nn_fw_' + scope
+            )
+
+            activations_bw = tf.contrib.layers.fully_connected(
+                inputs=outputs[1],
+                num_outputs=CELL_SIZE,
+                trainable=trainable,
+                scope='nn_bw_' + scope
+            )
+
+            return activations_fw + activations_bw
+
+        labeled_activations = get_activations(labeled_inputs, labeled_lengths,
+                                              scope=classification == 'slot_filling' and 'real' or 'dummy',
+                                              trainable=classification == 'slot_filling')
+        unlabeled_activations = get_activations(unlabeled_inputs, unlabeled_lengths,
+                                                scope=classification == 'pos' and 'real' or 'dummy',
+                                                trainable=classification == 'pos')
+
+        labeled_predictions = tf.contrib.layers.fully_connected(
+            inputs=labeled_activations,
+            num_outputs=num_slot,
+            trainable=classification == 'slot_filling',
+            scope='nn_labeled',
         )
 
-        outputs_fw = outputs[0]
-        outputs_bw = outputs[1]
-
-        activations_fw = tf.contrib.layers.fully_connected(
-            inputs=outputs_fw,
-            num_outputs=CELL_SIZE,
-            scope='fully_connected_fw'
+        labeled_loss = tf.losses.softmax_cross_entropy(
+            onehot_labels=tf.one_hot(labeled_target, num_slot),
+            logits=labeled_predictions,
+            weights=labeled_masks
         )
 
-        activations_bw = tf.contrib.layers.fully_connected(
-            inputs=outputs_bw,
-            num_outputs=CELL_SIZE,
-            scope='fully_connected_bw'
+        unlabeled_predictions = tf.contrib.layers.fully_connected(
+            inputs=unlabeled_activations,
+            num_outputs=num_pos,
+            trainable=classification == 'pos',
+            scope='nn_unlabeled',
         )
 
-        activations = activations_fw + activations_bw
+        unlabeled_loss = tf.losses.softmax_cross_entropy(
+            onehot_labels=tf.one_hot(unlabeled_target, num_pos),
+            logits=unlabeled_predictions,
+            weights=unlabeled_masks
+        )
 
-        if mode != tf.contrib.learn.ModeKeys.TRAIN or classification == 'pos':
-            unlabeled_predictions = tf.contrib.layers.fully_connected(
-                inputs=activations,
-                num_outputs=num_pos,
-                scope='fully_connected_pos'
-            )
-
-            unlabeled_target = tf.one_hot(unlabeled_target, num_pos)
-            loss = tf.losses.softmax_cross_entropy(
-                onehot_labels=unlabeled_target,
-                logits=unlabeled_predictions,
-                weights=unlabeled_masks
-            )
-
-            predictions = tf.argmax(unlabeled_predictions, 2)
-            target = tf.argmax(unlabeled_target, 2)
-            masks = unlabeled_masks
-
-        else:
-            labeled_predictions = tf.contrib.layers.fully_connected(
-                inputs=activations,
-                num_outputs=num_slot,
-                scope='fully_connected_slot'
-            )
-
-            labeled_target = tf.one_hot(labeled_target, num_slot)
-            loss = tf.losses.softmax_cross_entropy(
-                onehot_labels=labeled_target,
-                logits=labeled_predictions,
-                weights=labeled_masks
-            )
-
-            predictions = tf.argmax(labeled_predictions, 2)
-            target = tf.argmax(labeled_target, 2)
+        if classification == 'slot_filling':
+            loss = labeled_loss
+            predictions = tf.argmax(labeled_predictions, 2),
             masks = labeled_masks
+            target = labeled_target
+        else:
+            loss = unlabeled_loss
+            predictions = tf.argmax(unlabeled_predictions, 2),
+            masks = unlabeled_masks
+            target = unlabeled_target
 
         learning_rate = tf.train.exponential_decay(
             learning_rate=LEARNING_RATE,
@@ -203,6 +205,7 @@ class SlotFilling:
             },
             config=tf.contrib.learn.RunConfig(
                 gpu_memory_fraction=gpu_memory,
+                tf_random_seed=10,
                 save_checkpoints_secs=30,
             ),
             model_dir='./model'
@@ -218,7 +221,8 @@ class SlotFilling:
         }
 
         monitor = tf.contrib.learn.monitors.ValidationMonitor(
-            input_fn=lambda: SlotFilling.input_fn(validation_set, unlabeled_set, validation_set.size(), 1),
+            input_fn=lambda: SlotFilling.input_fn(validation_set, unlabeled_set, validation_set.size(),
+                                                  unlabeled_set.size()),
             eval_steps=1,
             every_n_steps=50,
             metrics=validation_metrics,
@@ -228,13 +232,14 @@ class SlotFilling:
         )
 
         classifier.fit(
-            input_fn=lambda: SlotFilling.input_fn(training_set, unlabeled_set, training_set.size(), 1),
+            input_fn=lambda: SlotFilling.input_fn(training_set, unlabeled_set, training_set.size(),
+                                                  unlabeled_set.size()),
             monitors=[monitor],
             steps=steps
         )
 
         predictions = classifier.predict(
-            input_fn=lambda: SlotFilling.input_fn(test_set, unlabeled_set, test_set.size(), 1)
+            input_fn=lambda: SlotFilling.input_fn(test_set, unlabeled_set, test_set.size(), unlabeled_set.size())
         )
 
         slot_correct = 0
