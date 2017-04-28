@@ -1,38 +1,38 @@
 import os
 import time
 
-from slot_filling_pos_tagging2 import SlotFilling
+from slot_filling_pos_tagging import SlotFilling
 
 experiments = [{
     'labeled_train': './data/atis.train_0.1',
     'gpu_memory': 0.2,
-    # }, {
-    #     'labeled_train': './data/atis.train_0.2',
-    #     'gpu_memory': 0.4,
-    # }, {
-    #     'labeled_train': './data/atis.train_0.3',
-    #     'gpu_memory': 0.4,
-    # }, {
-    #     'labeled_train': './data/atis.train_0.4',
-    #     'gpu_memory': 0.6,
-    # }, {
-    #     'labeled_train': './data/atis.train_0.5',
-    #     'gpu_memory': 0.6,
-    # }, {
-    #     'labeled_train': './data/atis.train_0.6',
-    #     'gpu_memory': 0.7,
-    # }, {
-    #     'labeled_train': './data/atis.train_0.7',
-    #     'gpu_memory': 0.8,
-    # }, {
-    #     'labeled_train': './data/atis.train_0.8',
-    #     'gpu_memory': 0.9,
-    # }, {
-    #     'labeled_train': './data/atis.train_0.9',
-    #     'gpu_memory': 1.0,
-    # }, {
-    #     'labeled_train': './data/atis.train_1.0',
-    #     'gpu_memory': 1.0,
+}, {
+    'labeled_train': './data/atis.train_0.2',
+    'gpu_memory': 0.2,
+}, {
+    'labeled_train': './data/atis.train_0.3',
+    'gpu_memory': 0.2,
+}, {
+    'labeled_train': './data/atis.train_0.4',
+    'gpu_memory': 0.2,
+}, {
+    'labeled_train': './data/atis.train_0.5',
+    'gpu_memory': 0.2,
+}, {
+    'labeled_train': './data/atis.train_0.6',
+    'gpu_memory': 0.2,
+}, {
+    'labeled_train': './data/atis.train_0.7',
+    'gpu_memory': 0.2,
+}, {
+    'labeled_train': './data/atis.train_0.8',
+    'gpu_memory': 0.2,
+}, {
+    'labeled_train': './data/atis.train_0.9',
+    'gpu_memory': 0.2,
+}, {
+    'labeled_train': './data/atis.train_1.0',
+    'gpu_memory': 0.2,
 }]
 
 if __name__ == '__main__':
@@ -68,8 +68,7 @@ if __name__ == '__main__':
             labeled_train=experiment['labeled_train'],
             unlabeled_slot=experiment['unlabeled_slot'],
             unlabeled_train=experiment['unlabeled_train'],
-            gpu_memory=experiment['gpu_memory'],
-            steps=10
+            gpu_memory=experiment['gpu_memory']
         )
         print('# Accuracy: {0:f}\n'.format(result['accuracy']))
 
