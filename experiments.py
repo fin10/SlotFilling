@@ -1,38 +1,38 @@
 import os
 import time
 
-from slot_filling import SlotFilling
+from slot_filling_pos_tagging2 import SlotFilling
 
 experiments = [{
     'labeled_train': './data/atis.train_0.1',
     'gpu_memory': 0.2,
-}, {
-    'labeled_train': './data/atis.train_0.2',
-    'gpu_memory': 0.4,
-}, {
-    'labeled_train': './data/atis.train_0.3',
-    'gpu_memory': 0.4,
-}, {
-    'labeled_train': './data/atis.train_0.4',
-    'gpu_memory': 0.6,
-}, {
-    'labeled_train': './data/atis.train_0.5',
-    'gpu_memory': 0.6,
-}, {
-    'labeled_train': './data/atis.train_0.6',
-    'gpu_memory': 0.7,
-}, {
-    'labeled_train': './data/atis.train_0.7',
-    'gpu_memory': 0.8,
-}, {
-    'labeled_train': './data/atis.train_0.8',
-    'gpu_memory': 0.9,
-}, {
-    'labeled_train': './data/atis.train_0.9',
-    'gpu_memory': 1.0,
-}, {
-    'labeled_train': './data/atis.train_1.0',
-    'gpu_memory': 1.0,
+    # }, {
+    #     'labeled_train': './data/atis.train_0.2',
+    #     'gpu_memory': 0.4,
+    # }, {
+    #     'labeled_train': './data/atis.train_0.3',
+    #     'gpu_memory': 0.4,
+    # }, {
+    #     'labeled_train': './data/atis.train_0.4',
+    #     'gpu_memory': 0.6,
+    # }, {
+    #     'labeled_train': './data/atis.train_0.5',
+    #     'gpu_memory': 0.6,
+    # }, {
+    #     'labeled_train': './data/atis.train_0.6',
+    #     'gpu_memory': 0.7,
+    # }, {
+    #     'labeled_train': './data/atis.train_0.7',
+    #     'gpu_memory': 0.8,
+    # }, {
+    #     'labeled_train': './data/atis.train_0.8',
+    #     'gpu_memory': 0.9,
+    # }, {
+    #     'labeled_train': './data/atis.train_0.9',
+    #     'gpu_memory': 1.0,
+    # }, {
+    #     'labeled_train': './data/atis.train_1.0',
+    #     'gpu_memory': 1.0,
 }]
 
 if __name__ == '__main__':
@@ -41,8 +41,8 @@ if __name__ == '__main__':
         'dev': './data/atis.dev',
         'test': './data/atis.test',
         'labeled_slot': './data/atis.slot',
-        'unlabeled_slot': './data/grammar_generated.slot',
-        'unlabeled_train': './data/grammar_generated.train',
+        'unlabeled_slot': './data/atis_pos.slot',
+        'unlabeled_train': './data/atis_pos.train',
         # 'unlabeled_train': None,
     }
 
@@ -69,7 +69,7 @@ if __name__ == '__main__':
             unlabeled_slot=experiment['unlabeled_slot'],
             unlabeled_train=experiment['unlabeled_train'],
             gpu_memory=experiment['gpu_memory'],
-            steps=1000
+            steps=10
         )
         print('# Accuracy: {0:f}\n'.format(result['accuracy']))
 

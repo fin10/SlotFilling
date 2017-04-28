@@ -8,7 +8,7 @@ from tensorflow.contrib.learn.python.learn.preprocessing import VocabularyProces
 class DataSet:
     IOB_REGEX = re.compile('\(([^)]+)\)\[([^\]]+)\]')
 
-    MAX_SENTENCE_LENGTH = 100
+    MAX_SENTENCE_LENGTH = 50
     UNK = '<unk>'
 
     __word_vocab = None
@@ -210,7 +210,7 @@ class DataSet:
 
             for j in range(DataSet.MAX_SENTENCE_LENGTH):
                 if tags[j] not in self.__slot_vocab:
-                    raise ValueError('{} is not included in slot vocab'.format(tags[j]))
+                    raise ValueError('{} is not included in slot vocab'.format(tags[j]), [d, t])
                 else:
                     tags[j] = self.__slot_vocab[tags[j]]
 

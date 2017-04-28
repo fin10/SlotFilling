@@ -88,47 +88,61 @@ class SlotFilling:
         activations_fw = tf.contrib.layers.fully_connected(
             inputs=outputs[0],
             num_outputs=CELL_SIZE,
+            scope='nn_fw'
         )
 
         activations_bw = tf.contrib.layers.fully_connected(
             inputs=outputs[1],
             num_outputs=CELL_SIZE,
+            scope='nn_bw'
         )
 
         activations = activations_fw + activations_bw
-        labeled_predictions = tf.contrib.layers.fully_connected(
-            inputs=activations,
-            num_outputs=num_slot,
-            scope='nn_labeled',
-        )
+        labeled_activations, unlabeled_activations = tf.split(value=activations,
+                                                              num_or_size_splits=[tf.shape(labeled_inputs)[0],
+                                                                                  tf.shape(unlabeled_inputs)[0]],
+                                                              axis=0)
 
-        labeled_predictions, _ = tf.split(value=labeled_predictions,
-                                          num_or_size_splits=[tf.shape(labeled_inputs)[0],
-                                                              tf.shape(unlabeled_inputs)[0]],
-                                          axis=0)
+        labeled_activations = tf.reshape(labeled_activations, [-1, CELL_SIZE])
+        unlabeled_activations = tf.reshape(unlabeled_activations, [-1, CELL_SIZE])
 
-        labeled_loss = tf.losses.softmax_cross_entropy(
-            onehot_labels=tf.one_hot(labeled_target, num_slot),
-            logits=labeled_predictions,
-            weights=labeled_masks
-        )
+        with tf.name_scope('labeled'):
+            w = tf.get_variable(
+                name='labeled_weights',
+                shape=[CELL_SIZE, num_slot]
+            )
+            b = tf.get_variable(
+                name='labeled_bias',
+                shape=[num_slot]
+            )
+            labeled_predictions = tf.matmul(labeled_activations, w) + b
+            labeled_predictions = tf.reshape(labeled_predictions, [-1, DataSet.MAX_SENTENCE_LENGTH, num_slot])
+            labeled_predictions = tf.nn.relu(labeled_predictions)
 
-        unlabeled_predictions = tf.contrib.layers.fully_connected(
-            inputs=activations,
-            num_outputs=num_pos,
-            scope='nn_unlabeled',
-        )
+            labeled_loss = tf.losses.softmax_cross_entropy(
+                onehot_labels=tf.one_hot(labeled_target, num_slot),
+                logits=labeled_predictions,
+                weights=labeled_masks
+            )
 
-        _, unlabeled_predictions = tf.split(value=unlabeled_predictions,
-                                            num_or_size_splits=[tf.shape(labeled_inputs)[0],
-                                                                tf.shape(unlabeled_inputs)[0]],
-                                            axis=0)
+        with tf.name_scope('unlabeled'):
+            w = tf.get_variable(
+                name='unlabeled_weights',
+                shape=[CELL_SIZE, num_pos]
+            )
+            b = tf.get_variable(
+                name='unlabeled_bias',
+                shape=[num_pos]
+            )
+            unlabeled_predictions = tf.matmul(unlabeled_activations, w) + b
+            unlabeled_predictions = tf.reshape(unlabeled_predictions, [-1, DataSet.MAX_SENTENCE_LENGTH, num_pos])
+            unlabeled_predictions = tf.nn.relu(unlabeled_predictions)
 
-        unlabeled_loss = tf.losses.softmax_cross_entropy(
-            onehot_labels=tf.one_hot(unlabeled_target, num_pos),
-            logits=unlabeled_predictions,
-            weights=unlabeled_masks
-        )
+            unlabeled_loss = tf.losses.softmax_cross_entropy(
+                onehot_labels=tf.one_hot(unlabeled_target, num_pos),
+                logits=unlabeled_predictions,
+                weights=unlabeled_masks
+            )
 
         ratio = tf.case({
             tf.contrib.framework.get_global_step() > THRESHOLD: lambda: tf.constant(1, dtype=tf.float32)
