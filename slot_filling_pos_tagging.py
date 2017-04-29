@@ -38,6 +38,7 @@ class PosTagging:
         num_pos = params['num_pos']
         embedding_dimension = params['embedding_dimension']
         vocab_size = params['vocab_size']
+        learning_rate = params['learning_rate']
         drop_out = mode == tf.contrib.learn.ModeKeys.TRAIN and params['drop_out'] or 1.0
 
         # labeled data
@@ -97,7 +98,7 @@ class PosTagging:
         )
 
         learning_rate = tf.train.exponential_decay(
-            learning_rate=LEARNING_RATE,
+            learning_rate=learning_rate,
             global_step=tf.contrib.framework.get_global_step(),
             decay_steps=100,
             decay_rate=0.96
@@ -130,7 +131,8 @@ class PosTagging:
                 'num_pos': training_set.num_classes(),
                 'drop_out': DROP_OUT,
                 'embedding_dimension': EMBEDDING_DIMENSION,
-                'vocab_size': DataSet.vocab_size()
+                'vocab_size': DataSet.vocab_size(),
+                'learning_rate': LEARNING_RATE
             }
         )
 
@@ -141,10 +143,9 @@ class PosTagging:
 
 
 class SlotFilling:
-    initialized = False
 
     @staticmethod
-    def input_fn(labeled: DataSet, labeled_size):
+    def input_fn(labeled: DataSet, labeled_size: int, unlabeled: DataSet, unlabeled_size: int):
         input_dict = {
         }
 
@@ -153,7 +154,15 @@ class SlotFilling:
         input_dict['labeled_inputs'] = tf.constant(np.array(labeled.inputs()))
         input_dict['labeled_sequence_length'] = tf.constant(labeled.lengths())
         input_dict['labeled_mask'] = tf.constant(labeled.masks())
+        input_dict['labeled_size'] = tf.constant(labeled.size())
         labels = tf.constant(labeled.labels())
+
+        # unlabeled data
+        unlabeled = unlabeled.get_batch(unlabeled_size)
+        input_dict['unlabeled_inputs'] = tf.constant(np.array(unlabeled.inputs()))
+        input_dict['unlabeled_sequence_length'] = tf.constant(unlabeled.lengths())
+        input_dict['unlabeled_mask'] = tf.constant(unlabeled.masks())
+        input_dict['unlabeled_size'] = tf.constant(unlabeled.size())
 
         return input_dict, labels
 
@@ -162,13 +171,21 @@ class SlotFilling:
         num_slot = params['num_slot']
         embedding_dimension = params['embedding_dimension']
         vocab_size = params['vocab_size']
+        learning_rate = params['learning_rate']
         drop_out = mode == tf.contrib.learn.ModeKeys.TRAIN and params['drop_out'] or 1.0
 
         # labeled data
         labeled_inputs = features['labeled_inputs']
         labeled_lengths = features['labeled_sequence_length']
         labeled_masks = features['labeled_mask']
+        labeled_size = features['labeled_size']
         labeled_target = target
+
+        # unlabeled data
+        unlabeled_inputs = features['unlabeled_inputs']
+        unlabeled_lengths = features['unlabeled_sequence_length']
+        unlabeled_masks = features['unlabeled_mask']
+        unlabeled_size = features['unlabeled_size']
 
         with tf.variable_scope('shared'):
             embeddings = tf.get_variable(
@@ -179,6 +196,10 @@ class SlotFilling:
 
             # embeddings
             labeled_inputs = tf.nn.embedding_lookup(embeddings, labeled_inputs)
+            unlabeled_inputs = tf.nn.embedding_lookup(embeddings, unlabeled_inputs)
+
+            inputs = tf.concat([labeled_inputs, unlabeled_inputs], axis=0)
+            lengths = tf.concat([labeled_lengths, unlabeled_lengths], axis=0)
 
             cell_fw = tf.contrib.rnn.GRUCell(CELL_SIZE)
             cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, output_keep_prob=drop_out)
@@ -189,8 +210,8 @@ class SlotFilling:
             outputs, _ = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw=cell_fw,
                 cell_bw=cell_bw,
-                inputs=labeled_inputs,
-                sequence_length=labeled_lengths,
+                inputs=inputs,
+                sequence_length=lengths,
                 dtype=tf.float32,
                 scope='rnn'
             )
@@ -209,11 +230,9 @@ class SlotFilling:
 
             activations = activations_fw + activations_bw
 
-        if not SlotFilling.initialized:
-            SlotFilling.initialized = True
-            tf.contrib.framework.init_from_checkpoint('./model_pos', {
-                'shared/': 'shared/'
-            })
+        tf.contrib.framework.init_from_checkpoint('./model_pos', {
+            'shared/': 'shared/'
+        })
 
         predictions = tf.contrib.layers.fully_connected(
             inputs=activations,
@@ -221,16 +240,28 @@ class SlotFilling:
             scope='slot_nn'
         )
 
-        loss = tf.losses.softmax_cross_entropy(
+        labeled_predictions, unlabeled_predictions = tf.split(predictions, [labeled_size, unlabeled_size])
+
+        labeled_loss = tf.losses.softmax_cross_entropy(
             onehot_labels=tf.one_hot(labeled_target, num_slot),
-            logits=predictions,
+            logits=labeled_predictions,
             weights=labeled_masks
         )
 
-        predictions = tf.argmax(predictions, 2)
+        unlabeled_loss = 0
+        if mode == tf.contrib.learn.ModeKeys.TRAIN:
+            unlabeled_target = tf.argmax(unlabeled_predictions, 2)
+            unlabeled_loss = tf.losses.softmax_cross_entropy(
+                onehot_labels=tf.one_hot(unlabeled_target, num_slot),
+                logits=unlabeled_predictions,
+                weights=unlabeled_masks
+            )
+
+        loss = labeled_loss + unlabeled_loss
+        labeled_predictions = tf.argmax(labeled_predictions, 2)
 
         learning_rate = tf.train.exponential_decay(
-            learning_rate=LEARNING_RATE,
+            learning_rate=learning_rate,
             global_step=tf.contrib.framework.get_global_step(),
             decay_steps=100,
             decay_rate=0.96
@@ -250,7 +281,7 @@ class SlotFilling:
             eval_metric_ops = {
                 'accuracy': tf.metrics.accuracy(
                     labels=labeled_target,
-                    predictions=predictions,
+                    predictions=labeled_predictions,
                     weights=labeled_masks
                 )
             }
@@ -258,14 +289,12 @@ class SlotFilling:
         return tf.contrib.learn.ModelFnOps(
             mode=mode,
             predictions={
-                'predictions': predictions
+                'predictions': labeled_predictions
             },
             loss=loss,
             train_op=train_op,
             eval_metric_ops=eval_metric_ops
         )
-
-    pre_trained = False
 
     @classmethod
     def run(cls, dev, test, labeled_slot, labeled_train, unlabeled_slot, unlabeled_train, gpu_memory):
@@ -279,16 +308,15 @@ class SlotFilling:
         print('# test_set (%d)' % test_set.size())
         print('# unlabeled_set (%d)' % unlabeled_set.size())
 
-        if not SlotFilling.pre_trained:
-            SlotFilling.pre_trained = True
+        if not os.path.exists('./model_pos'):
             PosTagging.run(unlabeled_set,
                            steps=PRE_TRAINING,
                            gpu_memory=gpu_memory,
                            random_seed=RANDOM_SEED)
 
         classifier = tf.contrib.learn.Estimator(
-            model_fn=SlotFilling.rnn_model_fn,
-            # model_dir='./model_sf',
+            model_fn=cls.rnn_model_fn,
+            model_dir='./model_sf',
             config=tf.contrib.learn.RunConfig(
                 gpu_memory_fraction=gpu_memory,
                 tf_random_seed=RANDOM_SEED,
@@ -299,6 +327,7 @@ class SlotFilling:
                 'drop_out': DROP_OUT,
                 'embedding_dimension': EMBEDDING_DIMENSION,
                 'vocab_size': DataSet.vocab_size(),
+                'learning_rate': LEARNING_RATE
             },
         )
 
@@ -312,7 +341,7 @@ class SlotFilling:
         }
 
         monitor = tf.contrib.learn.monitors.ValidationMonitor(
-            input_fn=lambda: SlotFilling.input_fn(validation_set, validation_set.size()),
+            input_fn=lambda: SlotFilling.input_fn(validation_set, validation_set.size(), unlabeled_set, 1),
             eval_steps=1,
             every_n_steps=50,
             metrics=validation_metrics,
@@ -322,13 +351,14 @@ class SlotFilling:
         )
 
         classifier.fit(
-            input_fn=lambda: SlotFilling.input_fn(training_set, training_set.size()),
+            input_fn=lambda: SlotFilling.input_fn(training_set, training_set.size(), unlabeled_set,
+                                                  unlabeled_set.size()),
             monitors=[monitor],
             steps=STEPS
         )
 
         predictions = classifier.predict(
-            input_fn=lambda: SlotFilling.input_fn(test_set, test_set.size())
+            input_fn=lambda: SlotFilling.input_fn(test_set, test_set.size(), unlabeled_set, 1)
         )
 
         slot_correct = 0
