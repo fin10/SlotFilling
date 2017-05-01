@@ -1,7 +1,7 @@
 import argparse
 import pickle
-
 import random
+import re
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -32,7 +32,13 @@ if __name__ == '__main__':
         for words, labels in zip(words_list, labels_list):
             tokens = []
             for word, label in zip(words, labels):
-                tokens.append('{}/{}'.format(idx2words[word], idx2labels[label]))
+                word = idx2words[word]
+                label = idx2labels[label]
+
+                if re.match('(digit)+', word):
+                    word = '<num>'
+
+                tokens.append('{}/{}'.format(word, label))
             result.append(' '.join(tokens))
         return result
 
