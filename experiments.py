@@ -121,7 +121,7 @@ if __name__ == '__main__':
         training_set = DataSet(slot, experiment['train'])
         validation_set = DataSet(slot, experiment['dev'])
         test_set = DataSet(slot, experiment['test'])
-        pseudo_set = DataSet(slot, config_pos['pseudo_set'])
+        pseudo_set = DataSet(slot, config['pseudo_set'])
 
         print('# [%d] %s' % (idx, experiment['train']))
         print('# training_set (%d)' % training_set.size())
