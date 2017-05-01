@@ -14,8 +14,11 @@ NUM_LAYERS = 1
 DROP_OUT = 0.5
 LEARNING_RATE = 0.001
 RANDOM_SEED = 10
-PRE_TRAINING = 0
+PRE_TRAINING = 2000
 STEPS = 1000
+POS_MODEL_DIR = './model_pos_semafor'
+# SF_MODEL_DIR = './model_sf_2000_bal'
+SF_MODEL_DIR = None
 
 
 class PosTagging:
@@ -121,7 +124,7 @@ class PosTagging:
     def run(cls, training_set, steps, gpu_memory, random_seed):
         classifier = tf.contrib.learn.Estimator(
             model_fn=cls.rnn_model_fn,
-            model_dir='./model_pos',
+            model_dir=POS_MODEL_DIR,
             config=tf.contrib.learn.RunConfig(
                 gpu_memory_fraction=gpu_memory,
                 tf_random_seed=random_seed,
@@ -200,6 +203,8 @@ class SlotFilling:
 
             inputs = tf.concat([labeled_inputs, unlabeled_inputs], axis=0)
             lengths = tf.concat([labeled_lengths, unlabeled_lengths], axis=0)
+            # inputs = labeled_inputs
+            # lengths = labeled_lengths
 
             cell_fw = tf.contrib.rnn.GRUCell(CELL_SIZE)
             cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, output_keep_prob=drop_out)
@@ -230,9 +235,9 @@ class SlotFilling:
 
             activations = activations_fw + activations_bw
 
-        tf.contrib.framework.init_from_checkpoint('./model_pos', {
-            'shared/': 'shared/'
-        })
+        # tf.contrib.framework.init_from_checkpoint(POS_MODEL_DIR, {
+        #     'shared/': 'shared/'
+        # })
 
         predictions = tf.contrib.layers.fully_connected(
             inputs=activations,
@@ -241,6 +246,7 @@ class SlotFilling:
         )
 
         labeled_predictions, unlabeled_predictions = tf.split(predictions, [labeled_size, unlabeled_size])
+        # labeled_predictions = predictions
 
         labeled_loss = tf.losses.softmax_cross_entropy(
             onehot_labels=tf.one_hot(labeled_target, num_slot),
@@ -257,7 +263,18 @@ class SlotFilling:
                 weights=unlabeled_masks
             )
 
-        loss = labeled_loss + unlabeled_loss
+        def balancing(t1, t2, af, t):
+            t1 = tf.to_float(t1)
+            t2 = tf.to_float(t2)
+            af = tf.to_float(af)
+            t = tf.to_float(t)
+
+            return tf.case({
+                t < t1: lambda: tf.constant(0, dtype=tf.float32),
+                t2 <= t: lambda: af
+            }, default=lambda: (af * (t - t1)) / (t2 - t1))
+
+        loss = labeled_loss + unlabeled_loss * balancing(300, 450, 1, tf.contrib.framework.get_global_step())
         labeled_predictions = tf.argmax(labeled_predictions, 2)
 
         learning_rate = tf.train.exponential_decay(
@@ -308,7 +325,7 @@ class SlotFilling:
         print('# test_set (%d)' % test_set.size())
         print('# unlabeled_set (%d)' % unlabeled_set.size())
 
-        if not os.path.exists('./model_pos'):
+        if not os.path.exists(POS_MODEL_DIR):
             PosTagging.run(unlabeled_set,
                            steps=PRE_TRAINING,
                            gpu_memory=gpu_memory,
@@ -316,7 +333,7 @@ class SlotFilling:
 
         classifier = tf.contrib.learn.Estimator(
             model_fn=cls.rnn_model_fn,
-            model_dir='./model_sf',
+            model_dir=SF_MODEL_DIR,
             config=tf.contrib.learn.RunConfig(
                 gpu_memory_fraction=gpu_memory,
                 tf_random_seed=RANDOM_SEED,

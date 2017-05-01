@@ -5,34 +5,34 @@ from slot_filling_pos_tagging import SlotFilling
 
 experiments = [{
     'labeled_train': './data/atis.train_0.1',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.3,
 }, {
     'labeled_train': './data/atis.train_0.2',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.3,
 }, {
     'labeled_train': './data/atis.train_0.3',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.5,
 }, {
     'labeled_train': './data/atis.train_0.4',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.5,
 }, {
     'labeled_train': './data/atis.train_0.5',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.5,
 }, {
     'labeled_train': './data/atis.train_0.6',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.5,
 }, {
     'labeled_train': './data/atis.train_0.7',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.7,
 }, {
     'labeled_train': './data/atis.train_0.8',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.7,
 }, {
     'labeled_train': './data/atis.train_0.9',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.7,
 }, {
     'labeled_train': './data/atis.train_1.0',
-    'gpu_memory': 0.2,
+    'gpu_memory': 0.7,
 }]
 
 if __name__ == '__main__':
