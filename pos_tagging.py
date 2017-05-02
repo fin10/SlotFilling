@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import tensorflow as tf
 
@@ -110,6 +112,9 @@ class PosTagging:
     def run(cls, training_set, steps, gpu_memory, random_seed, vocab_size, drop_out, cell_size, embedding_dimension,
             learning_rate):
         model_dir = '{}_{}'.format(POS_MODEL_DIR, steps)
+
+        if os.path.exists(model_dir):
+            return model_dir
 
         classifier = tf.contrib.learn.Estimator(
             model_fn=cls.rnn_model_fn,

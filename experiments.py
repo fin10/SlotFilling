@@ -70,7 +70,7 @@ experiments = [{
     'gpu_memory': 0.7,
 }]
 
-default = {
+common = {
     'dev': './data/atis.pkl.dev',
     'test': './data/atis.pkl.test',
     'slot': './data/atis.pkl.slot',
@@ -79,11 +79,7 @@ default = {
 if __name__ == '__main__':
 
     config = config_plain
-    experiments = experiments[:1]
-
-    print('# Experiments (%d)' % len(experiments))
-    for experiment in experiments:
-        experiment.update(default)
+    # experiments = experiments[:1]
 
     if not os.path.exists('./out'):
         os.mkdir('./out')
@@ -91,6 +87,14 @@ if __name__ == '__main__':
     # for vocab size
     DataSet('./data/atis.pkl.slot', './data/atis.pkl.train')
     DataSet('./data/atis.pos.slot', './data/atis.pos.train')
+
+    slot = common['slot']
+    validation_set = DataSet(slot, common['dev'])
+    test_set = DataSet(slot, common['test'])
+
+    print('# Experiments (%d)' % len(experiments))
+    print('# validation_set (%d)' % validation_set.size())
+    print('# test_set (%d)' % test_set.size())
 
     pos_model = None
     if 'pos_model' in config:
@@ -117,16 +121,12 @@ if __name__ == '__main__':
     over_matches = []
 
     for idx, experiment in enumerate(experiments):
-        slot = experiment['slot']
         training_set = DataSet(slot, experiment['train'])
-        validation_set = DataSet(slot, experiment['dev'])
-        test_set = DataSet(slot, experiment['test'])
-        pseudo_set = DataSet(slot, config_pos['pseudo_set'])
+        pseudo_set = DataSet(slot, config['pseudo_set'])
 
         print('# [%d] %s' % (idx, experiment['train']))
         print('# training_set (%d)' % training_set.size())
-        print('# validation_set (%d)' % validation_set.size())
-        print('# test_set (%d)' % test_set.size())
+        print('# pseudo_set (%d)' % pseudo_set.size())
 
         result = SlotFilling.run(
             training_set=training_set,
