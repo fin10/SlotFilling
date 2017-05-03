@@ -6,44 +6,52 @@ from data_set import DataSet
 from pos_tagging import PosTagging
 from slot_filling_pos_tagging import SlotFilling
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 tf.logging.set_verbosity(tf.logging.INFO)
 
-POS_STEPS = 2000
+POS_STEPS = 3000
 RANDOM_SEED = 10
 EMBEDDING_DIMENSION = 100
 CELL_SIZE = 100
-DROP_OUT = 0.5
 LEARNING_RATE = 0.001
+
 
 config_plain = {
     'name': 'plain',
     'pseudo_set': './data/pseudo_dummy.train',
+    'drop_out': 0.1,
+    'pseudo_params': [0, 0, 0]
 }
 
 config_pos = {
     'name': 'pos',
     'pos_model': POS_STEPS,
     'pseudo_set': './data/pseudo_dummy.train',
+    'drop_out': 0.2,
+    'pseudo_params': [0, 0, 0]
 }
 
 config_pseudo_label = {
     'name': 'pl',
     'pseudo_set': './data/atis.pkl.train',
+    'drop_out': 0.2,
+    'pseudo_params': [150, 550, 1]
 }
 
 config_pos_pseudo_label = {
     'name': 'pl_with_pos',
     'pos_model': POS_STEPS,
     'pseudo_set': './data/atis.pkl.train',
+    'drop_out': 0.2,
+    'pseudo_params': [150, 550, 1]
 }
 
 experiments = [{
     'train': './data/atis.pkl.train_1',
-    'gpu_memory': 0.3,
+    'gpu_memory': 0.5,
 }, {
     'train': './data/atis.pkl.train_2',
-    'gpu_memory': 0.3,
+    'gpu_memory': 0.5,
 }, {
     'train': './data/atis.pkl.train_3',
     'gpu_memory': 0.5,
@@ -67,7 +75,7 @@ experiments = [{
     'gpu_memory': 0.7,
 }, {
     'train': './data/atis.pkl.train_10',
-    'gpu_memory': 0.7,
+    'gpu_memory': 0.8,
 }]
 
 common = {
@@ -79,7 +87,7 @@ common = {
 if __name__ == '__main__':
 
     config = config_plain
-    # experiments = experiments[:1]
+    experiments = experiments[9:10]
 
     if not os.path.exists('./out'):
         os.mkdir('./out')
@@ -108,12 +116,18 @@ if __name__ == '__main__':
             gpu_memory=0.2,
             random_seed=RANDOM_SEED,
             vocab_size=DataSet.vocab_size(),
-            drop_out=DROP_OUT,
+            drop_out=config['drop_out'],
             cell_size=CELL_SIZE,
             embedding_dimension=EMBEDDING_DIMENSION,
             learning_rate=LEARNING_RATE
         )
 
+    ev = {
+        'accuracy': [],
+        'precision': [],
+        'recall': [],
+        'f-measure': [],
+    }
     accuracies = []
     corrects = []
     no_matches = []
@@ -136,13 +150,20 @@ if __name__ == '__main__':
             gpu_memory=experiment['gpu_memory'],
             random_seed=RANDOM_SEED,
             vocab_size=DataSet.vocab_size(),
-            drop_out=DROP_OUT,
+            drop_out=config['drop_out'],
             cell_size=CELL_SIZE,
             embedding_dimension=EMBEDDING_DIMENSION,
             learning_rate=LEARNING_RATE,
-            pos_model_dir=pos_model
+            pos_model_dir=pos_model,
+            pseudo_params=config['pseudo_params']
         )
-        print('# Accuracy: {0:f}\n'.format(result['accuracy']))
+        print('# Accuracy: {0:f}'.format(result['accuracy']))
+        print('# F-Measure: {0:f}\n'.format(result['ev_f_measure']))
+
+        ev['accuracy'].append(str(result['ev_accuracy']))
+        ev['precision'].append(str(result['ev_precision']))
+        ev['recall'].append(str(result['ev_recall']))
+        ev['f-measure'].append(str(result['ev_f_measure']))
 
         accuracies.append(str(result['accuracy']))
         corrects.append(str(result['correct']))
@@ -151,6 +172,10 @@ if __name__ == '__main__':
         over_matches.append(str(result['over_match']))
 
         with open(os.path.join('./out', '{}.csv'.format(config['name'])), mode='w') as output:
+            output.write('ev_accuracy,%s\n' % ','.join(ev['accuracy']))
+            output.write('ev_precision,%s\n' % ','.join(ev['precision']))
+            output.write('ev_recall,%s\n' % ','.join(ev['recall']))
+            output.write('ev_f_measure,%s\n' % ','.join(ev['f-measure']))
             output.write('accuracy,%s\n' % ','.join(accuracies))
             output.write('correct,%s\n' % ','.join(corrects))
             output.write('no_match,%s\n' % ','.join(no_matches))

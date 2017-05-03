@@ -40,6 +40,7 @@ class SlotFilling:
         vocab_size = params['vocab_size']
         learning_rate = params['learning_rate']
         pos_model_dir = params['pos_model_dir']
+        start, end, value = params['pseudo_params']
         drop_out = mode == tf.contrib.learn.ModeKeys.TRAIN and params['drop_out'] or 1.0
 
         # labeled data
@@ -140,8 +141,7 @@ class SlotFilling:
                 t2 <= t: lambda: af
             }, default=lambda: (af * (t - t1)) / (t2 - t1))
 
-        loss = labeled_loss + unlabeled_loss * balancing(300, 450, 1, tf.contrib.framework.get_global_step())
-        labeled_predictions = tf.argmax(labeled_predictions, 2)
+        loss = labeled_loss + unlabeled_loss * balancing(start, end, value, tf.contrib.framework.get_global_step())
 
         learning_rate = tf.train.exponential_decay(
             learning_rate=learning_rate,
@@ -159,14 +159,40 @@ class SlotFilling:
                 optimizer='Adam'
             )
 
+        labeled_predictions = tf.argmax(labeled_predictions, 2)
+
         eval_metric_ops = None
         if mode != tf.contrib.learn.ModeKeys.INFER:
+            precisions = []
+            recalls = []
+            for i in range(num_slot):
+                index_map = tf.one_hot(i, depth=num_slot)
+                precisions.append(tf.contrib.metrics.streaming_precision(
+                    predictions=tf.gather(index_map, labeled_predictions),
+                    labels=tf.gather(index_map, labeled_target),
+                    weights=labeled_masks
+                ))
+                recalls.append(tf.contrib.metrics.streaming_recall(
+                    predictions=tf.gather(index_map, labeled_predictions),
+                    labels=tf.gather(index_map, labeled_target),
+                    weights=labeled_masks
+                ))
+
+            precisions = [op for value, op in precisions]
+            recalls = [op for value, op in recalls]
+
+            precision = sum(precisions) / num_slot
+            recall = sum(recalls) / num_slot
+
             eval_metric_ops = {
-                'accuracy': tf.metrics.accuracy(
+                'accuracy': tf.contrib.metrics.streaming_accuracy(
                     labels=labeled_target,
                     predictions=labeled_predictions,
                     weights=labeled_masks
-                )
+                ),
+                'precision': precision,
+                'recall': recall,
+                'f-measure': 2 * (precision * recall) / (precision + recall)
             }
 
         return tf.contrib.learn.ModelFnOps(
@@ -181,7 +207,7 @@ class SlotFilling:
 
     @classmethod
     def run(cls, training_set, dev_set, test_set, pseudo_set, gpu_memory, random_seed, vocab_size, drop_out, cell_size,
-            embedding_dimension, learning_rate, pos_model_dir):
+            embedding_dimension, learning_rate, pos_model_dir, pseudo_params):
         classifier = tf.contrib.learn.Estimator(
             model_fn=cls.rnn_model_fn,
             model_dir=SF_MODEL_DIR,
@@ -197,17 +223,17 @@ class SlotFilling:
                 'embedding_dimension': embedding_dimension,
                 'vocab_size': vocab_size,
                 'learning_rate': learning_rate,
-                'pos_model_dir': pos_model_dir
+                'pos_model_dir': pos_model_dir,
+                'pseudo_params': pseudo_params
             },
         )
 
         validation_metrics = {
-            "accuracy":
-                tf.contrib.learn.MetricSpec(
-                    metric_fn=tf.contrib.metrics.streaming_accuracy,
-                    prediction_key='predictions',
-                    weight_key='labeled_mask'
-                )
+            'accuracy': tf.contrib.learn.MetricSpec(
+                metric_fn=tf.contrib.metrics.streaming_accuracy,
+                prediction_key='predictions',
+                weight_key='labeled_mask'
+            ),
         }
 
         monitor = tf.contrib.learn.monitors.ValidationMonitor(
@@ -221,13 +247,23 @@ class SlotFilling:
         )
 
         classifier.fit(
-            input_fn=lambda: SlotFilling.input_fn(training_set, training_set.size(), pseudo_set, pseudo_set.size()),
+            input_fn=lambda: SlotFilling.input_fn(training_set, training_set.size(), pseudo_set, 2000),
             monitors=[monitor],
             steps=STEPS
         )
 
+        ev = classifier.evaluate(
+            input_fn=lambda: SlotFilling.input_fn(test_set, test_set.size(), pseudo_set, 1),
+            steps=1
+        )
+
+        accuracy = ev['accuracy']
+        precision = ev['precision']
+        recall = ev['recall']
+        f_measure = ev['f-measure']
+
         predictions = classifier.predict(
-            input_fn=lambda: SlotFilling.input_fn(test_set, test_set.size(), pseudo_set, 1)
+            input_fn=lambda: SlotFilling.input_fn(test_set, test_set.size(), pseudo_set, 1),
         )
 
         slot_correct = 0
@@ -250,6 +286,10 @@ class SlotFilling:
                     slot_mismatch += 1
 
         return {
+            'ev_accuracy': accuracy,
+            'ev_precision': precision,
+            'ev_recall': recall,
+            'ev_f_measure': f_measure,
             'accuracy': slot_correct / sum(test_set.lengths()),
             'correct': slot_correct,
             'no_match': slot_no_match,

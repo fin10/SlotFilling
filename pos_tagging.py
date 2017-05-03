@@ -102,10 +102,26 @@ class PosTagging:
             optimizer='Adam'
         )
 
+        predictions = tf.argmax(predictions, 2)
+
+        eval_metric_ops = None
+        if mode != tf.contrib.learn.ModeKeys.INFER:
+            eval_metric_ops = {
+                'accuracy': tf.metrics.accuracy(
+                    labels=target,
+                    predictions=predictions,
+                    weights=masks
+                )
+            }
+
         return tf.contrib.learn.ModelFnOps(
             mode=mode,
+            predictions={
+                'predictions': predictions
+            },
             loss=loss,
             train_op=train_op,
+            eval_metric_ops=eval_metric_ops
         )
 
     @classmethod
@@ -134,8 +150,28 @@ class PosTagging:
             }
         )
 
-        classifier.fit(
+        validation_metrics = {
+            "accuracy":
+                tf.contrib.learn.MetricSpec(
+                    metric_fn=tf.contrib.metrics.streaming_accuracy,
+                    prediction_key='predictions',
+                    weight_key='mask'
+                )
+        }
+
+        monitor = tf.contrib.learn.monitors.ValidationMonitor(
             input_fn=lambda: cls.input_fn(training_set, training_set.size()),
+            eval_steps=1,
+            every_n_steps=50,
+            metrics=validation_metrics,
+            early_stopping_metric="loss",
+            early_stopping_metric_minimize=True,
+            early_stopping_rounds=300
+        )
+
+        classifier.fit(
+            input_fn=lambda: cls.input_fn(training_set, 2000),
+            monitors=[monitor],
             steps=steps
         )
 
