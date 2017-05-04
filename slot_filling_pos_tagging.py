@@ -5,7 +5,7 @@ from data_set import DataSet
 
 # SF_MODEL_DIR = './model_sf'
 SF_MODEL_DIR = None
-STEPS = 1500
+STEPS = 2000
 
 
 class SlotFilling:
@@ -163,26 +163,38 @@ class SlotFilling:
 
         eval_metric_ops = None
         if mode != tf.contrib.learn.ModeKeys.INFER:
-            precisions = []
-            recalls = []
+            tps = []
+            fps = []
+            fns = []
             for i in range(num_slot):
                 index_map = tf.one_hot(i, depth=num_slot)
-                precisions.append(tf.contrib.metrics.streaming_precision(
-                    predictions=tf.gather(index_map, labeled_predictions),
+                _, tp = tf.contrib.metrics.streaming_true_positives(
                     labels=tf.gather(index_map, labeled_target),
-                    weights=labeled_masks
-                ))
-                recalls.append(tf.contrib.metrics.streaming_recall(
                     predictions=tf.gather(index_map, labeled_predictions),
-                    labels=tf.gather(index_map, labeled_target),
                     weights=labeled_masks
-                ))
+                )
 
-            precisions = [op for value, op in precisions]
-            recalls = [op for value, op in recalls]
+                _, fp = tf.contrib.metrics.streaming_false_positives(
+                    labels=tf.gather(index_map, labeled_target),
+                    predictions=tf.gather(index_map, labeled_predictions),
+                    weights=labeled_masks
+                )
 
-            precision = sum(precisions) / num_slot
-            recall = sum(recalls) / num_slot
+                _, fn = tf.contrib.metrics.streaming_false_negatives(
+                    labels=tf.gather(index_map, labeled_target),
+                    predictions=tf.gather(index_map, labeled_predictions),
+                    weights=labeled_masks
+                )
+
+                tps.append(tp)
+                fps.append(fp)
+                fns.append(fn)
+
+            tp = sum(tps)
+            fp = sum(fps)
+            fn = sum(fns)
+            precision = tp / (tp + fp)
+            recall = tp / (tp + fn)
 
             eval_metric_ops = {
                 'accuracy': tf.contrib.metrics.streaming_accuracy(

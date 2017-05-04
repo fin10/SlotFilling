@@ -19,7 +19,7 @@ LEARNING_RATE = 0.001
 config_plain = {
     'name': 'plain',
     'pseudo_set': './data/pseudo_dummy.train',
-    'drop_out': 0.1,
+    'drop_out': 0.2,
     'pseudo_params': [0, 0, 0]
 }
 
@@ -27,7 +27,7 @@ config_pos = {
     'name': 'pos',
     'pos_model': POS_STEPS,
     'pseudo_set': './data/pseudo_dummy.train',
-    'drop_out': 0.2,
+    'drop_out': 0.3,
     'pseudo_params': [0, 0, 0]
 }
 
@@ -42,8 +42,8 @@ config_pos_pseudo_label = {
     'name': 'pl_with_pos',
     'pos_model': POS_STEPS,
     'pseudo_set': './data/atis.pkl.train',
-    'drop_out': 0.2,
-    'pseudo_params': [150, 550, 1]
+    'drop_out': 0.3,
+    'pseudo_params': [350, 600, 1]
 }
 
 experiments = [{
@@ -86,7 +86,7 @@ common = {
 
 if __name__ == '__main__':
 
-    config = config_plain
+    config = config_pos_pseudo_label
     experiments = experiments[9:10]
 
     if not os.path.exists('./out'):
@@ -172,10 +172,10 @@ if __name__ == '__main__':
         over_matches.append(str(result['over_match']))
 
         with open(os.path.join('./out', '{}.csv'.format(config['name'])), mode='w') as output:
-            output.write('ev_accuracy,%s\n' % ','.join(ev['accuracy']))
-            output.write('ev_precision,%s\n' % ','.join(ev['precision']))
-            output.write('ev_recall,%s\n' % ','.join(ev['recall']))
-            output.write('ev_f_measure,%s\n' % ','.join(ev['f-measure']))
+            # output.write('ev_accuracy,%s\n' % ','.join(ev['accuracy']))
+            # output.write('ev_precision,%s\n' % ','.join(ev['precision']))
+            # output.write('ev_recall,%s\n' % ','.join(ev['recall']))
+            # output.write('ev_f_measure,%s\n' % ','.join(ev['f-measure']))
             output.write('accuracy,%s\n' % ','.join(accuracies))
             output.write('correct,%s\n' % ','.join(corrects))
             output.write('no_match,%s\n' % ','.join(no_matches))
