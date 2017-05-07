@@ -48,10 +48,7 @@ class PosTagging:
             inputs = tf.nn.embedding_lookup(embeddings, inputs)
 
             cell_fw = tf.contrib.rnn.GRUCell(cell_size)
-            cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, output_keep_prob=drop_out)
-
             cell_bw = tf.contrib.rnn.GRUCell(cell_size)
-            cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, output_keep_prob=drop_out)
 
             outputs, _ = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw=cell_fw,
@@ -62,19 +59,7 @@ class PosTagging:
                 scope='rnn'
             )
 
-            activations_fw = tf.contrib.layers.fully_connected(
-                inputs=outputs[0],
-                num_outputs=cell_size,
-                scope='nn_fw'
-            )
-
-            activations_bw = tf.contrib.layers.fully_connected(
-                inputs=outputs[1],
-                num_outputs=cell_size,
-                scope='nn_bw'
-            )
-
-            activations = activations_fw + activations_bw
+            activations = outputs[0] + outputs[1]
 
         predictions = tf.contrib.layers.fully_connected(
             inputs=activations,
@@ -166,14 +151,21 @@ class PosTagging:
             metrics=validation_metrics,
             early_stopping_metric="loss",
             early_stopping_metric_minimize=True,
-            early_stopping_rounds=300
+            early_stopping_rounds=200
         )
 
         classifier.fit(
-            input_fn=lambda: cls.input_fn(training_set, 2000),
+            input_fn=lambda: cls.input_fn(training_set, 3000),
             monitors=[monitor],
             steps=steps
         )
+
+        accuracy = classifier.evaluate(
+            input_fn=lambda: cls.input_fn(training_set, training_set.size()),
+            steps=1
+        )['accuracy']
+
+        print('# Accuracy: {0:f}'.format(accuracy))
 
         return model_dir
 

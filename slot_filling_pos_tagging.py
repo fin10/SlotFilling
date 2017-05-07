@@ -5,7 +5,7 @@ from data_set import DataSet
 
 # SF_MODEL_DIR = './model_sf'
 SF_MODEL_DIR = None
-STEPS = 2000
+STEPS = 3000
 
 
 class SlotFilling:
@@ -73,10 +73,7 @@ class SlotFilling:
             # lengths = labeled_lengths
 
             cell_fw = tf.contrib.rnn.GRUCell(cell_size)
-            cell_fw = tf.contrib.rnn.DropoutWrapper(cell_fw, output_keep_prob=drop_out)
-
             cell_bw = tf.contrib.rnn.GRUCell(cell_size)
-            cell_bw = tf.contrib.rnn.DropoutWrapper(cell_bw, output_keep_prob=drop_out)
 
             outputs, _ = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw=cell_fw,
@@ -87,19 +84,7 @@ class SlotFilling:
                 scope='rnn'
             )
 
-            activations_fw = tf.contrib.layers.fully_connected(
-                inputs=outputs[0],
-                num_outputs=cell_size,
-                scope='nn_fw'
-            )
-
-            activations_bw = tf.contrib.layers.fully_connected(
-                inputs=outputs[1],
-                num_outputs=cell_size,
-                scope='nn_bw'
-            )
-
-            activations = activations_fw + activations_bw
+            activations = outputs[0] + outputs[1]
 
         if pos_model_dir is not None:
             tf.contrib.framework.init_from_checkpoint(pos_model_dir, {
@@ -249,23 +234,23 @@ class SlotFilling:
         }
 
         monitor = tf.contrib.learn.monitors.ValidationMonitor(
-            input_fn=lambda: SlotFilling.input_fn(dev_set, dev_set.size(), pseudo_set, 1),
+            input_fn=lambda: cls.input_fn(dev_set, dev_set.size(), pseudo_set, 1),
             eval_steps=1,
             every_n_steps=50,
             metrics=validation_metrics,
             early_stopping_metric="loss",
             early_stopping_metric_minimize=True,
-            early_stopping_rounds=300
+            early_stopping_rounds=100
         )
 
         classifier.fit(
-            input_fn=lambda: SlotFilling.input_fn(training_set, training_set.size(), pseudo_set, 2000),
+            input_fn=lambda: cls.input_fn(training_set, training_set.size(), pseudo_set, 1),
             monitors=[monitor],
             steps=STEPS
         )
 
         ev = classifier.evaluate(
-            input_fn=lambda: SlotFilling.input_fn(test_set, test_set.size(), pseudo_set, 1),
+            input_fn=lambda: cls.input_fn(test_set, test_set.size(), pseudo_set, 1),
             steps=1
         )
 

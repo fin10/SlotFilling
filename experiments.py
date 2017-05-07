@@ -9,7 +9,7 @@ from slot_filling_pos_tagging import SlotFilling
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 tf.logging.set_verbosity(tf.logging.INFO)
 
-POS_STEPS = 3000
+POS_STEPS = 2000
 RANDOM_SEED = 10
 EMBEDDING_DIMENSION = 100
 CELL_SIZE = 100
@@ -35,15 +35,15 @@ config_pseudo_label = {
     'name': 'pl',
     'pseudo_set': './data/atis.pkl.train',
     'drop_out': 0.2,
-    'pseudo_params': [150, 550, 1]
+    'pseudo_params': [200, 400, 1]
 }
 
 config_pos_pseudo_label = {
     'name': 'pl_with_pos',
     'pos_model': POS_STEPS,
     'pseudo_set': './data/atis.pkl.train',
-    'drop_out': 0.3,
-    'pseudo_params': [350, 600, 1]
+    'drop_out': 0.2,
+    'pseudo_params': [400, 600, 1]
 }
 
 experiments = [{
@@ -60,19 +60,19 @@ experiments = [{
     'gpu_memory': 0.5,
 }, {
     'train': './data/atis.pkl.train_5',
-    'gpu_memory': 0.5,
+    'gpu_memory': 0.6,
 }, {
     'train': './data/atis.pkl.train_6',
-    'gpu_memory': 0.5,
+    'gpu_memory': 0.6,
 }, {
     'train': './data/atis.pkl.train_7',
     'gpu_memory': 0.7,
 }, {
     'train': './data/atis.pkl.train_8',
-    'gpu_memory': 0.7,
+    'gpu_memory': 0.8,
 }, {
     'train': './data/atis.pkl.train_9',
-    'gpu_memory': 0.7,
+    'gpu_memory': 0.8,
 }, {
     'train': './data/atis.pkl.train_10',
     'gpu_memory': 0.8,
@@ -86,8 +86,8 @@ common = {
 
 if __name__ == '__main__':
 
-    config = config_pos_pseudo_label
-    experiments = experiments[9:10]
+    config = config_plain
+    # experiments = experiments[5:6]
 
     if not os.path.exists('./out'):
         os.mkdir('./out')
