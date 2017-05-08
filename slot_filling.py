@@ -95,7 +95,7 @@ class SlotFilling:
                 optimizer='Adam'
             )
 
-        labeled_predictions = tf.argmax(predictions, 2)
+        predictions = tf.argmax(predictions, 2)
 
         eval_metric_ops = None
         if mode != tf.contrib.learn.ModeKeys.INFER:
@@ -106,19 +106,19 @@ class SlotFilling:
                 index_map = tf.one_hot(i, depth=num_slot)
                 _, tp = tf.contrib.metrics.streaming_true_positives(
                     labels=tf.gather(index_map, target),
-                    predictions=tf.gather(index_map, labeled_predictions),
+                    predictions=tf.gather(index_map, predictions),
                     weights=masks
                 )
 
                 _, fp = tf.contrib.metrics.streaming_false_positives(
                     labels=tf.gather(index_map, target),
-                    predictions=tf.gather(index_map, labeled_predictions),
+                    predictions=tf.gather(index_map, predictions),
                     weights=masks
                 )
 
                 _, fn = tf.contrib.metrics.streaming_false_negatives(
                     labels=tf.gather(index_map, target),
-                    predictions=tf.gather(index_map, labeled_predictions),
+                    predictions=tf.gather(index_map, predictions),
                     weights=masks
                 )
 
@@ -135,7 +135,7 @@ class SlotFilling:
             eval_metric_ops = {
                 'accuracy': tf.contrib.metrics.streaming_accuracy(
                     labels=target,
-                    predictions=labeled_predictions,
+                    predictions=predictions,
                     weights=masks
                 ),
                 'f-measure': 2 * (precision * recall) / (precision + recall)
@@ -144,7 +144,7 @@ class SlotFilling:
         return tf.contrib.learn.ModelFnOps(
             mode=mode,
             predictions={
-                'predictions': labeled_predictions
+                'predictions': predictions
             },
             loss=loss,
             train_op=train_op,
@@ -177,7 +177,7 @@ class SlotFilling:
             'accuracy': tf.contrib.learn.MetricSpec(
                 metric_fn=tf.contrib.metrics.streaming_accuracy,
                 prediction_key='predictions',
-                weight_key='labeled_mask'
+                weight_key='mask'
             ),
         }
 
