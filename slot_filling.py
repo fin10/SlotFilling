@@ -1,25 +1,45 @@
-import numpy as np
 import tensorflow as tf
-
-from data_set import DataSet
 
 # SF_MODEL_DIR = './model_sf'
 SF_MODEL_DIR = None
 SF_STEPS = 3000
+MAX_SEQUENCE_LENGTH = 50
+PADDING = 999
 
 
 class SlotFilling:
 
     @staticmethod
-    def input_fn(labeled: DataSet, labeled_size: int):
+    def input_fn(data_set):
         input_dict = {
         }
 
-        labeled = labeled.get_batch(labeled_size)
-        input_dict['inputs'] = tf.constant(np.array(labeled.inputs()))
-        input_dict['sequence_length'] = tf.constant(labeled.lengths())
-        input_dict['mask'] = tf.constant(labeled.masks())
-        labels = tf.constant(labeled.labels())
+        inputs = []
+        lengths = []
+        masks = []
+        labels = []
+        for words, slots in zip(data_set[0], data_set[2]):
+            length = len(words)
+            if length > MAX_SEQUENCE_LENGTH:
+                raise ValueError('Length should be lower than %d: %d' % (MAX_SEQUENCE_LENGTH, length))
+
+            x = []
+            y = []
+            mask = []
+            for idx in range(MAX_SEQUENCE_LENGTH):
+                mask.append(idx < length and 1 or 0)
+                x.append(idx < length and words[idx] or PADDING)
+                y.append(idx < length and slots[idx] or PADDING)
+
+            inputs.append(x)
+            labels.append(y)
+            lengths.append(length)
+            masks.append(mask)
+
+        input_dict['inputs'] = tf.constant(inputs)
+        input_dict['sequence_length'] = tf.constant(lengths)
+        input_dict['mask'] = tf.constant(masks)
+        labels = tf.constant(labels)
 
         return input_dict, labels
 
@@ -152,7 +172,7 @@ class SlotFilling:
         )
 
     @classmethod
-    def run(cls, training_set, dev_set, test_set, gpu_memory, random_seed, vocab_size, drop_out, cell_size,
+    def run(cls, training_set, dev_set, test_set, num_slot, gpu_memory, random_seed, vocab_size, drop_out, cell_size,
             embedding_dimension, learning_rate, pos_model_dir):
         classifier = tf.contrib.learn.Estimator(
             model_fn=cls.rnn_model_fn,
@@ -163,7 +183,7 @@ class SlotFilling:
                 save_checkpoints_secs=30,
             ),
             params={
-                'num_slot': training_set.num_classes(),
+                'num_slot': num_slot,
                 'drop_out': drop_out,
                 'cell_size': cell_size,
                 'embedding_dimension': embedding_dimension,
@@ -182,7 +202,7 @@ class SlotFilling:
         }
 
         monitor = tf.contrib.learn.monitors.ValidationMonitor(
-            input_fn=lambda: cls.input_fn(dev_set, dev_set.size()),
+            input_fn=lambda: cls.input_fn(dev_set),
             eval_steps=1,
             every_n_steps=50,
             metrics=validation_metrics,
@@ -192,13 +212,13 @@ class SlotFilling:
         )
 
         classifier.fit(
-            input_fn=lambda: cls.input_fn(training_set, training_set.size()),
+            input_fn=lambda: cls.input_fn(training_set),
             monitors=[monitor],
             steps=SF_STEPS
         )
 
         ev = classifier.evaluate(
-            input_fn=lambda: cls.input_fn(test_set, test_set.size()),
+            input_fn=lambda: cls.input_fn(test_set),
             steps=1
         )
 

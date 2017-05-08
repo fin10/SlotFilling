@@ -1,4 +1,6 @@
 import os
+import pickle
+import random
 
 import tensorflow as tf
 
@@ -28,28 +30,38 @@ config_pos = {
 }
 
 common = {
-    'train': './data/atis.pkl.train',
-    'dev': './data/atis.pkl.dev',
-    'test': './data/atis.pkl.test',
-    'slot': './data/atis.pkl.slot',
+    'pkl': './data/atis.pkl'
 }
 
 if __name__ == '__main__':
 
     config = config_plain
 
-    # for vocab size
-    DataSet('./data/atis.pkl.slot', './data/atis.pkl.train')
-    DataSet('./data/atis.pos.slot', './data/atis.pos.train')
+    with open(common['pkl'], 'rb') as f:
+        train, test, dicts = pickle.load(f, encoding='latin1')
 
-    slot = common['slot']
-    training_set = DataSet(slot, common['train'])
-    validation_set = DataSet(slot, common['dev'])
-    test_set = DataSet(slot, common['test'])
 
-    print('# training_set (%d)' % training_set.size())
-    print('# validation_set (%d)' % validation_set.size())
-    print('# test_set (%d)' % test_set.size())
+    def divide(data: list, ratio: float):
+        size = len(data[0])
+
+        indices = random.sample([x for x in range(size)], size)
+        data0 = [data[0][index] for index in indices]
+        data1 = [data[1][index] for index in indices]
+        data2 = [data[2][index] for index in indices]
+
+        pivot = int(size * ratio)
+        return (data0[:pivot], data1[:pivot], data2[:pivot]), (data0[pivot:], data1[pivot:], data2[pivot:])
+
+
+    train, dev = divide(train, 0.8)
+    num_slot = len(dicts['labels2idx'].keys())
+    vocab_size = len(dicts['words2idx'].keys())
+
+    print('# training_set (%d)' % len(train))
+    print('# validation_set (%d)' % len(dev))
+    print('# test_set (%d)' % len(test))
+    print('# num_slot (%d)' % num_slot)
+    print('# vocab_size (%d)' % vocab_size)
 
     pos_model = None
     if 'pos_model' in config:
@@ -60,7 +72,7 @@ if __name__ == '__main__':
             training_set=pos_set,
             gpu_memory=config['gpu_memory'],
             random_seed=RANDOM_SEED,
-            vocab_size=DataSet.vocab_size(),
+            vocab_size=vocab_size,
             drop_out=config['drop_out'],
             cell_size=CELL_SIZE,
             embedding_dimension=EMBEDDING_DIMENSION,
@@ -68,12 +80,13 @@ if __name__ == '__main__':
         )
 
     result = SlotFilling.run(
-        training_set=training_set,
-        dev_set=validation_set,
-        test_set=test_set,
+        training_set=train,
+        dev_set=dev,
+        test_set=test,
+        num_slot=num_slot,
         gpu_memory=config['gpu_memory'],
         random_seed=RANDOM_SEED,
-        vocab_size=DataSet.vocab_size(),
+        vocab_size=vocab_size,
         drop_out=config['drop_out'],
         cell_size=CELL_SIZE,
         embedding_dimension=EMBEDDING_DIMENSION,
