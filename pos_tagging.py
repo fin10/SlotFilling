@@ -6,9 +6,11 @@ import tensorflow as tf
 from data_set import DataSet
 
 POS_MODEL_DIR = './model_pos'
+POS_STEPS = 2000
 
 
 class PosTagging:
+
     @staticmethod
     def input_fn(data_set: DataSet, size):
         input_dict = {
@@ -110,16 +112,14 @@ class PosTagging:
         )
 
     @classmethod
-    def run(cls, training_set, steps, gpu_memory, random_seed, vocab_size, drop_out, cell_size, embedding_dimension,
+    def run(cls, training_set, gpu_memory, random_seed, vocab_size, drop_out, cell_size, embedding_dimension,
             learning_rate):
-        model_dir = '{}_{}'.format(POS_MODEL_DIR, steps)
-
-        if os.path.exists(model_dir):
-            return model_dir
+        if os.path.exists(POS_MODEL_DIR):
+            return POS_MODEL_DIR
 
         classifier = tf.contrib.learn.Estimator(
             model_fn=cls.rnn_model_fn,
-            model_dir=model_dir,
+            model_dir=POS_MODEL_DIR,
             config=tf.contrib.learn.RunConfig(
                 gpu_memory_fraction=gpu_memory,
                 tf_random_seed=random_seed,
@@ -157,7 +157,7 @@ class PosTagging:
         classifier.fit(
             input_fn=lambda: cls.input_fn(training_set, 3000),
             monitors=[monitor],
-            steps=steps
+            steps=POS_STEPS
         )
 
         accuracy = classifier.evaluate(
@@ -167,7 +167,7 @@ class PosTagging:
 
         print('# Accuracy: {0:f}'.format(accuracy))
 
-        return model_dir
+        return POS_MODEL_DIR
 
 
 if __name__ == '__main__':
