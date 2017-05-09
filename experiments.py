@@ -1,10 +1,9 @@
+import json
 import os
-import pickle
 import random
 
 import tensorflow as tf
 
-from data_set import DataSet
 from pos_tagging import PosTagging
 from slot_filling import SlotFilling
 
@@ -30,49 +29,72 @@ config_pos = {
 }
 
 common = {
-    'pkl': './data/atis.pkl'
+    'pkl': './data/atis.pkl',
+    'train': './data/atis_pos.pkl.train.json',
+    'test': './data/atis_pos.pkl.test.json',
+    'dict': './data/atis_pos.pkl.dict.json',
 }
 
 if __name__ == '__main__':
 
     config = config_plain
 
-    with open(common['pkl'], 'rb') as f:
-        train, test, dicts = pickle.load(f, encoding='latin1')
+
+    def convert(dataset):
+        return ([dataset[index]['words'] for index in range(len(dataset))],
+                [dataset[index]['entities'] for index in range(len(dataset))],
+                [dataset[index]['labels'] for index in range(len(dataset))],
+                [dataset[index]['tags'] for index in range(len(dataset))])
 
 
-    def divide(data: list, ratio: float):
+    with open(common['train']) as f:
+        train = convert(json.load(f))
+
+    with open(common['test']) as f:
+        test = convert(json.load(f))
+
+    with open(common['dict']) as f:
+        dicts = json.load(f)
+
+
+    def divide(data, ratio: float):
         size = len(data[0])
 
         indices = random.sample([x for x in range(size)], size)
         data0 = [data[0][index] for index in indices]
         data1 = [data[1][index] for index in indices]
         data2 = [data[2][index] for index in indices]
+        data3 = [data[3][index] for index in indices]
 
         pivot = int(size * ratio)
-        return (data0[:pivot], data1[:pivot], data2[:pivot]), (data0[pivot:], data1[pivot:], data2[pivot:])
-
+        return (data0[:pivot], data1[:pivot], data2[:pivot], data3[:pivot]), (
+        data0[pivot:], data1[pivot:], data2[pivot:], data3[pivot:])
 
     train, dev = divide(train, 0.8)
     num_slot = len(dicts['labels2idx'].keys())
+    num_pos = len(dicts['tag2idx'].keys())
     vocab_size = len(dicts['words2idx'].keys())
+    entity_size = len(dicts['tables2idx'].keys())
 
     print('# training_set (%d)' % len(train))
     print('# validation_set (%d)' % len(dev))
     print('# test_set (%d)' % len(test))
     print('# num_slot (%d)' % num_slot)
+    print('# num_pos (%d)' % num_pos)
     print('# vocab_size (%d)' % vocab_size)
+    print('# entity_size (%d)' % entity_size)
 
     pos_model = None
     if 'pos_model' in config:
-        pos_set = DataSet('./data/atis.pos.slot', './data/atis.pos.train')
-        print('# POS pre-training set (%d)' % pos_set.size())
-
         pos_model = PosTagging.run(
-            training_set=pos_set,
+            training_set=train,
+            dev_set=dev,
+            test_set=test,
+            num_pos=num_pos,
             gpu_memory=config['gpu_memory'],
             random_seed=RANDOM_SEED,
             vocab_size=vocab_size,
+            entity_size=entity_size,
             drop_out=config['drop_out'],
             cell_size=CELL_SIZE,
             embedding_dimension=EMBEDDING_DIMENSION,
@@ -87,6 +109,7 @@ if __name__ == '__main__':
         gpu_memory=config['gpu_memory'],
         random_seed=RANDOM_SEED,
         vocab_size=vocab_size,
+        entity_size=entity_size,
         drop_out=config['drop_out'],
         cell_size=CELL_SIZE,
         embedding_dimension=EMBEDDING_DIMENSION,
