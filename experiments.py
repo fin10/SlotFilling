@@ -1,10 +1,10 @@
+import datetime
 import json
 import os
 import random
 
 import tensorflow as tf
 
-from pos_tagging import PosTagging
 from slot_filling import SlotFilling
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
@@ -15,18 +15,57 @@ EMBEDDING_DIMENSION = 100
 CELL_SIZE = 100
 LEARNING_RATE = 0.001
 
+random.seed(RANDOM_SEED)
+
 config_plain = {
     'name': 'plain',
     'drop_out': 0.2,
-    'gpu_memory': 0.8,
+    'gpu_memory': 0.5,
+    'embedding_mode': None,
+    'one_hot': False,
 }
 
-config_pos = {
-    'name': 'pos',
-    'drop_out': 0.3,
-    'gpu_memory': 0.8,
-    'pos_model': True
+config_plain_ne = {
+    'name': 'plain_ne',
+    'drop_out': 0.2,
+    'gpu_memory': 0.5,
+    'embedding_mode': 'ne',
+    'one_hot': False,
 }
+
+config_plain_pos = {
+    'name': 'plain_pos',
+    'drop_out': 0.2,
+    'gpu_memory': 0.5,
+    'embedding_mode': 'pos',
+    'one_hot': False,
+}
+
+config_plain_ne_pos = {
+    'name': 'plain_ne_pos',
+    'drop_out': 0.2,
+    'gpu_memory': 0.5,
+    'embedding_mode': 'ne_pos',
+    'one_hot': False,
+}
+
+config_plain_ne_oh = {
+    'name': 'plain_ne_oh',
+    'drop_out': 0.2,
+    'gpu_memory': 0.5,
+    'embedding_mode': 'ne',
+    'one_hot': True,
+}
+
+config_plain_pos_oh = {
+    'name': 'plain_pos_oh',
+    'drop_out': 0.2,
+    'gpu_memory': 0.5,
+    'embedding_mode': 'pos',
+    'one_hot': True,
+}
+
+config = config_plain
 
 common = {
     'pkl': './data/atis.pkl',
@@ -36,9 +75,6 @@ common = {
 }
 
 if __name__ == '__main__':
-
-    config = config_plain
-
 
     def convert(dataset):
         return ([dataset[index]['words'] for index in range(len(dataset))],
@@ -56,7 +92,6 @@ if __name__ == '__main__':
     with open(common['dict']) as f:
         dicts = json.load(f)
 
-
     def divide(data, ratio: float):
         size = len(data[0])
 
@@ -68,38 +103,23 @@ if __name__ == '__main__':
 
         pivot = int(size * ratio)
         return (data0[:pivot], data1[:pivot], data2[:pivot], data3[:pivot]), (
-        data0[pivot:], data1[pivot:], data2[pivot:], data3[pivot:])
+            data0[pivot:], data1[pivot:], data2[pivot:], data3[pivot:])
 
     train, dev = divide(train, 0.8)
     num_slot = len(dicts['labels2idx'].keys())
-    num_pos = len(dicts['tag2idx'].keys())
     vocab_size = len(dicts['words2idx'].keys())
     entity_size = len(dicts['tables2idx'].keys())
+    tag_size = len(dicts['tag2idx'].keys())
 
     print('# training_set (%d)' % len(train))
     print('# validation_set (%d)' % len(dev))
     print('# test_set (%d)' % len(test))
     print('# num_slot (%d)' % num_slot)
-    print('# num_pos (%d)' % num_pos)
     print('# vocab_size (%d)' % vocab_size)
     print('# entity_size (%d)' % entity_size)
+    print('# tag_size (%d)' % tag_size)
 
-    pos_model = None
-    if 'pos_model' in config:
-        pos_model = PosTagging.run(
-            training_set=train,
-            dev_set=dev,
-            test_set=test,
-            num_pos=num_pos,
-            gpu_memory=config['gpu_memory'],
-            random_seed=RANDOM_SEED,
-            vocab_size=vocab_size,
-            entity_size=entity_size,
-            drop_out=config['drop_out'],
-            cell_size=CELL_SIZE,
-            embedding_dimension=EMBEDDING_DIMENSION,
-            learning_rate=LEARNING_RATE
-        )
+    start = datetime.datetime.now()
 
     result = SlotFilling.run(
         training_set=train,
@@ -110,19 +130,24 @@ if __name__ == '__main__':
         random_seed=RANDOM_SEED,
         vocab_size=vocab_size,
         entity_size=entity_size,
+        tag_size=tag_size,
         drop_out=config['drop_out'],
         cell_size=CELL_SIZE,
         embedding_dimension=EMBEDDING_DIMENSION,
         learning_rate=LEARNING_RATE,
-        pos_model_dir=pos_model,
+        embedding_mode=config['embedding_mode'],
+        one_hot=config['one_hot']
     )
 
     print('# Accuracy: {0:f}'.format(result['accuracy']))
-    print('# F1 score: {0:f}\n'.format(result['f_measure']))
+    print('# F1 score: {0:f}'.format(result['f_measure']))
+
+    diff = datetime.datetime.now() - start
+    print('# %s' % diff)
 
     if not os.path.exists('./out'):
         os.mkdir('./out')
 
-    with open(os.path.join('./out', '{}.csv'.format(config['name'])), mode='w') as output:
+    with open(os.path.join('./out', '{}.csv'.format(config['name'])), mode='a') as output:
         output.write('# Accuracy: {0:f}\n'.format(result['accuracy']))
         output.write('# F1 score: {0:f}\n'.format(result['f_measure']))

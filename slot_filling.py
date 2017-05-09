@@ -4,7 +4,10 @@ import tensorflow as tf
 SF_MODEL_DIR = None
 SF_STEPS = 3000
 MAX_SEQUENCE_LENGTH = 50
-PADDING = 999
+WORD_PADDING = 572
+LABEL_PADDING = 127
+ENTITY_PADDING = 141
+TAG_PADDING = 34
 
 
 class SlotFilling:
@@ -16,10 +19,11 @@ class SlotFilling:
 
         inputs = []
         named_entities = []
+        pos = []
         lengths = []
         masks = []
         labels = []
-        for words, entities, slots in zip(data_set[0], data_set[1], data_set[2]):
+        for words, entities, slots, tags in zip(data_set[0], data_set[1], data_set[2], data_set[3]):
             length = len(words)
             if length > MAX_SEQUENCE_LENGTH:
                 raise ValueError('Length should be lower than %d: %d' % (MAX_SEQUENCE_LENGTH, length))
@@ -27,21 +31,32 @@ class SlotFilling:
             x = []
             y = []
             entity = []
+            tag = []
             mask = []
             for idx in range(MAX_SEQUENCE_LENGTH):
-                x.append(idx < length and words[idx] or PADDING)
-                y.append(idx < length and slots[idx] or PADDING)
-                entity.append(idx < length and entities[idx] or PADDING)
-                mask.append(idx < length and 1 or 0)
+                if idx < length:
+                    x.append(words[idx])
+                    y.append(slots[idx])
+                    entity.append(entities[idx])
+                    tag.append(tags[idx])
+                    mask.append(1.0)
+                else:
+                    x.append(WORD_PADDING)
+                    y.append(LABEL_PADDING)
+                    entity.append(ENTITY_PADDING)
+                    tag.append(TAG_PADDING)
+                    mask.append(0.0)
 
             inputs.append(x)
-            named_entities.append(entity)
             labels.append(y)
+            named_entities.append(entity)
+            pos.append(tag)
             lengths.append(length)
             masks.append(mask)
 
         input_dict['input'] = tf.constant(inputs)
         input_dict['named_entity'] = tf.constant(named_entities)
+        input_dict['pos'] = tf.constant(pos)
         input_dict['sequence_length'] = tf.constant(lengths)
         input_dict['mask'] = tf.constant(masks)
         labels = tf.constant(labels)
@@ -55,51 +70,67 @@ class SlotFilling:
         embedding_dimension = params['embedding_dimension']
         vocab_size = params['vocab_size']
         entity_size = params['entity_size']
+        tag_size = params['tag_size']
         learning_rate = params['learning_rate']
-        pos_model_dir = params['pos_model_dir']
+        embedding_mode = params['embedding_mode']
+        one_hot = params['one_hot']
         drop_out = mode == tf.contrib.learn.ModeKeys.TRAIN and params['drop_out'] or 1.0
 
         inputs = features['input']
         named_entities = features['named_entity']
+        pos = features['pos']
         lengths = features['sequence_length']
         masks = features['mask']
         target = target
 
-        with tf.variable_scope('shared'):
-            word_embeddings = tf.get_variable(
-                name='word_embeddings',
-                shape=[vocab_size, embedding_dimension],
-                initializer=tf.random_uniform_initializer(-1, 1)
-            )
+        word_embeddings = tf.get_variable(
+            name='word_embeddings',
+            shape=[vocab_size, embedding_dimension],
+            initializer=tf.random_uniform_initializer(-1, 1)
+        )
 
+        # embeddings
+        inputs = tf.nn.embedding_lookup(word_embeddings, inputs)
+
+        if one_hot:
+            named_entities = tf.one_hot(named_entities, entity_size)
+            pos = tf.one_hot(pos, tag_size)
+        else:
             entity_embeddings = tf.get_variable(
                 name='entity_embeddings',
                 shape=[entity_size, embedding_dimension],
                 initializer=tf.random_uniform_initializer(-1, 1)
             )
 
-            # embeddings
-            inputs = tf.nn.embedding_lookup(word_embeddings, inputs)
-            named_entities = tf.nn.embedding_lookup(entity_embeddings, named_entities)
-
-            cell_fw = tf.contrib.rnn.GRUCell(cell_size)
-            cell_bw = tf.contrib.rnn.GRUCell(cell_size)
-
-            outputs, _ = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw=cell_fw,
-                cell_bw=cell_bw,
-                inputs=tf.concat([inputs, named_entities], axis=2),
-                sequence_length=lengths,
-                dtype=tf.float32,
-                scope='rnn'
+            pos_embeddings = tf.get_variable(
+                name='pos_embeddings',
+                shape=[tag_size, embedding_dimension],
+                initializer=tf.random_uniform_initializer(-1, 1)
             )
 
-            activations = outputs[0] + outputs[1]
+            named_entities = tf.nn.embedding_lookup(entity_embeddings, named_entities)
+            pos = tf.nn.embedding_lookup(pos_embeddings, pos)
 
-        if pos_model_dir is not None:
-            tf.contrib.framework.init_from_checkpoint(pos_model_dir, {
-                'shared/': 'shared/'
-            })
+        if embedding_mode == 'ne':
+            inputs = tf.concat([inputs, named_entities], axis=2)
+        elif embedding_mode == 'pos':
+            inputs = tf.concat([inputs, pos], axis=2)
+        elif embedding_mode == 'ne_pos':
+            inputs = tf.concat([inputs, named_entities, pos], axis=2)
+
+        cell_fw = tf.contrib.rnn.GRUCell(cell_size)
+        cell_bw = tf.contrib.rnn.GRUCell(cell_size)
+
+        outputs, _ = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw=cell_fw,
+            cell_bw=cell_bw,
+            inputs=inputs,
+            sequence_length=lengths,
+            dtype=tf.float32,
+            scope='rnn'
+        )
+
+        activations = outputs[0] + outputs[1]
 
         predictions = tf.contrib.layers.fully_connected(
             inputs=activations,
@@ -188,9 +219,9 @@ class SlotFilling:
         )
 
     @classmethod
-    def run(cls, training_set, dev_set, test_set, num_slot, gpu_memory, random_seed, vocab_size, entity_size, drop_out,
-            cell_size,
-            embedding_dimension, learning_rate, pos_model_dir):
+    def run(cls, training_set, dev_set, test_set, num_slot, gpu_memory, random_seed, vocab_size, entity_size, tag_size,
+            drop_out,
+            cell_size, embedding_dimension, learning_rate, embedding_mode, one_hot):
         classifier = tf.contrib.learn.Estimator(
             model_fn=cls.rnn_model_fn,
             model_dir=SF_MODEL_DIR,
@@ -200,14 +231,16 @@ class SlotFilling:
                 save_checkpoints_secs=30,
             ),
             params={
-                'num_slot': num_slot,
+                'num_slot': num_slot + 1,
                 'drop_out': drop_out,
                 'cell_size': cell_size,
                 'embedding_dimension': embedding_dimension,
-                'vocab_size': vocab_size,
-                'entity_size': entity_size,
+                'vocab_size': vocab_size + 1,
+                'entity_size': entity_size + 1,
+                'tag_size': tag_size + 1,
                 'learning_rate': learning_rate,
-                'pos_model_dir': pos_model_dir,
+                'embedding_mode': embedding_mode,
+                'one_hot': one_hot
             },
         )
 
