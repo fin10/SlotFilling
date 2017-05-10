@@ -3,6 +3,9 @@ import tensorflow as tf
 # SF_MODEL_DIR = './model_sf'
 SF_MODEL_DIR = None
 SF_STEPS = 3000
+EMBEDDING_DIMENSION = 100
+CELL_SIZE = 100
+LEARNING_RATE = 0.001
 MAX_SEQUENCE_LENGTH = 50
 WORD_PADDING = 572
 LABEL_PADDING = 127
@@ -66,14 +69,14 @@ class SlotFilling:
     @staticmethod
     def rnn_model_fn(features, target, mode, params):
         num_slot = params['num_slot']
-        cell_size = params['cell_size']
-        embedding_dimension = params['embedding_dimension']
+        cell_size = CELL_SIZE
+        embedding_dimension = EMBEDDING_DIMENSION
         vocab_size = params['vocab_size']
         entity_size = params['entity_size']
         tag_size = params['tag_size']
-        learning_rate = params['learning_rate']
+        learning_rate = LEARNING_RATE
         embedding_mode = params['embedding_mode']
-        one_hot = params['one_hot']
+        cnn = params['cnn']
         drop_out = mode == tf.contrib.learn.ModeKeys.TRAIN and params['drop_out'] or 1.0
 
         inputs = features['input']
@@ -83,40 +86,54 @@ class SlotFilling:
         masks = features['mask']
         target = target
 
-        word_embeddings = tf.get_variable(
-            name='word_embeddings',
-            shape=[vocab_size, embedding_dimension],
-            initializer=tf.random_uniform_initializer(-1, 1)
-        )
+        def embedding(name, size, ids):
+            return tf.nn.embedding_lookup(tf.get_variable(
+                name=name,
+                shape=[size, embedding_dimension],
+                initializer=tf.random_uniform_initializer(-1, 1)
+            ), ids)
 
         # embeddings
-        inputs = tf.nn.embedding_lookup(word_embeddings, inputs)
+        inputs = embedding('word_embeddings', vocab_size, inputs)
 
-        if one_hot:
-            named_entities = tf.one_hot(named_entities, entity_size)
-            pos = tf.one_hot(pos, tag_size)
-        else:
-            entity_embeddings = tf.get_variable(
-                name='entity_embeddings',
-                shape=[entity_size, embedding_dimension],
-                initializer=tf.random_uniform_initializer(-1, 1)
-            )
-
-            pos_embeddings = tf.get_variable(
-                name='pos_embeddings',
-                shape=[tag_size, embedding_dimension],
-                initializer=tf.random_uniform_initializer(-1, 1)
-            )
-
-            named_entities = tf.nn.embedding_lookup(entity_embeddings, named_entities)
-            pos = tf.nn.embedding_lookup(pos_embeddings, pos)
+        def conv2d(kernel_size, stride, ips):
+            return tf.reshape(tf.contrib.layers.conv2d(
+                inputs=ips,
+                num_outputs=embedding_dimension,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding='SAME'
+            ), [-1, MAX_SEQUENCE_LENGTH, embedding_dimension])
 
         if embedding_mode == 'ne':
+            named_entities = embedding('entity_embeddings', entity_size, named_entities)
+
+            if cnn:
+                inputs = conv2d(5, 1, inputs)
+                named_entities = conv2d(5, 1, named_entities)
+
             inputs = tf.concat([inputs, named_entities], axis=2)
         elif embedding_mode == 'pos':
+            pos = embedding('pos_embeddings', tag_size, pos)
+
+            if cnn:
+                inputs = conv2d(5, 1, inputs)
+                pos = conv2d(7, 1, pos)
+
             inputs = tf.concat([inputs, pos], axis=2)
         elif embedding_mode == 'ne_pos':
+            named_entities = embedding('entity_embeddings', entity_size, named_entities)
+            pos = embedding('pos_embeddings', tag_size, pos)
+
+            if cnn:
+                inputs = conv2d(5, 1, inputs)
+                named_entities = conv2d(5, 1, named_entities)
+                pos = conv2d(7, 1, pos)
+
             inputs = tf.concat([inputs, named_entities, pos], axis=2)
+        else:
+            if cnn:
+                inputs = conv2d(5, 1, inputs)
 
         cell_fw = tf.contrib.rnn.GRUCell(cell_size)
         cell_bw = tf.contrib.rnn.GRUCell(cell_size)
@@ -220,8 +237,7 @@ class SlotFilling:
 
     @classmethod
     def run(cls, training_set, dev_set, test_set, num_slot, gpu_memory, random_seed, vocab_size, entity_size, tag_size,
-            drop_out,
-            cell_size, embedding_dimension, learning_rate, embedding_mode, one_hot):
+            drop_out, embedding_mode, cnn):
         classifier = tf.contrib.learn.Estimator(
             model_fn=cls.rnn_model_fn,
             model_dir=SF_MODEL_DIR,
@@ -233,14 +249,11 @@ class SlotFilling:
             params={
                 'num_slot': num_slot + 1,
                 'drop_out': drop_out,
-                'cell_size': cell_size,
-                'embedding_dimension': embedding_dimension,
                 'vocab_size': vocab_size + 1,
                 'entity_size': entity_size + 1,
                 'tag_size': tag_size + 1,
-                'learning_rate': learning_rate,
                 'embedding_mode': embedding_mode,
-                'one_hot': one_hot
+                'cnn': cnn
             },
         )
 

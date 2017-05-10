@@ -11,9 +11,6 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 tf.logging.set_verbosity(tf.logging.INFO)
 
 RANDOM_SEED = 10
-EMBEDDING_DIMENSION = 100
-CELL_SIZE = 100
-LEARNING_RATE = 0.001
 
 random.seed(RANDOM_SEED)
 
@@ -22,7 +19,7 @@ config_plain = {
     'drop_out': 0.2,
     'gpu_memory': 0.5,
     'embedding_mode': None,
-    'one_hot': False,
+    'cnn': False,
 }
 
 config_plain_ne = {
@@ -30,7 +27,7 @@ config_plain_ne = {
     'drop_out': 0.2,
     'gpu_memory': 0.5,
     'embedding_mode': 'ne',
-    'one_hot': False,
+    'cnn': False,
 }
 
 config_plain_pos = {
@@ -38,7 +35,7 @@ config_plain_pos = {
     'drop_out': 0.2,
     'gpu_memory': 0.5,
     'embedding_mode': 'pos',
-    'one_hot': False,
+    'cnn': False,
 }
 
 config_plain_ne_pos = {
@@ -46,26 +43,40 @@ config_plain_ne_pos = {
     'drop_out': 0.2,
     'gpu_memory': 0.5,
     'embedding_mode': 'ne_pos',
-    'one_hot': False,
+    'cnn': False,
 }
 
-config_plain_ne_oh = {
-    'name': 'plain_ne_oh',
+config_cnn = {
+    'name': 'cnn',
+    'drop_out': 0.2,
+    'gpu_memory': 0.5,
+    'embedding_mode': None,
+    'cnn': True,
+}
+
+config_cnn_ne = {
+    'name': 'cnn_ne',
     'drop_out': 0.2,
     'gpu_memory': 0.5,
     'embedding_mode': 'ne',
-    'one_hot': True,
+    'cnn': True,
 }
 
-config_plain_pos_oh = {
-    'name': 'plain_pos_oh',
+config_cnn_pos = {
+    'name': 'cnn_pos',
     'drop_out': 0.2,
     'gpu_memory': 0.5,
     'embedding_mode': 'pos',
-    'one_hot': True,
+    'cnn': True,
 }
 
-config = config_plain
+config_cnn_ne_pos = {
+    'name': 'cnn_ne_pos',
+    'drop_out': 0.2,
+    'gpu_memory': 0.5,
+    'embedding_mode': 'ne_pos',
+    'cnn': True,
+}
 
 common = {
     'pkl': './data/atis.pkl',
@@ -81,7 +92,6 @@ if __name__ == '__main__':
                 [dataset[index]['entities'] for index in range(len(dataset))],
                 [dataset[index]['labels'] for index in range(len(dataset))],
                 [dataset[index]['tags'] for index in range(len(dataset))])
-
 
     with open(common['train']) as f:
         train = convert(json.load(f))
@@ -119,35 +129,32 @@ if __name__ == '__main__':
     print('# entity_size (%d)' % entity_size)
     print('# tag_size (%d)' % tag_size)
 
-    start = datetime.datetime.now()
+    for config in [config_cnn_pos, config_cnn_ne_pos]:
+        start = datetime.datetime.now()
 
-    result = SlotFilling.run(
-        training_set=train,
-        dev_set=dev,
-        test_set=test,
-        num_slot=num_slot,
-        gpu_memory=config['gpu_memory'],
-        random_seed=RANDOM_SEED,
-        vocab_size=vocab_size,
-        entity_size=entity_size,
-        tag_size=tag_size,
-        drop_out=config['drop_out'],
-        cell_size=CELL_SIZE,
-        embedding_dimension=EMBEDDING_DIMENSION,
-        learning_rate=LEARNING_RATE,
-        embedding_mode=config['embedding_mode'],
-        one_hot=config['one_hot']
-    )
+        result = SlotFilling.run(
+            training_set=train,
+            dev_set=dev,
+            test_set=test,
+            num_slot=num_slot,
+            gpu_memory=config['gpu_memory'],
+            random_seed=RANDOM_SEED,
+            vocab_size=vocab_size,
+            entity_size=entity_size,
+            tag_size=tag_size,
+            drop_out=config['drop_out'],
+            embedding_mode=config['embedding_mode'],
+            cnn=config['cnn']
+        )
 
-    print('# Accuracy: {0:f}'.format(result['accuracy']))
-    print('# F1 score: {0:f}'.format(result['f_measure']))
+        print('# Accuracy: {0:f}'.format(result['accuracy']))
+        print('# F1 score: {0:f}'.format(result['f_measure']))
 
-    diff = datetime.datetime.now() - start
-    print('# %s' % diff)
+        diff = datetime.datetime.now() - start
+        print('# %s' % diff)
 
-    if not os.path.exists('./out'):
-        os.mkdir('./out')
+        if not os.path.exists('./out'):
+            os.mkdir('./out')
 
-    with open(os.path.join('./out', '{}.csv'.format(config['name'])), mode='a') as output:
-        output.write('# Accuracy: {0:f}\n'.format(result['accuracy']))
-        output.write('# F1 score: {0:f}\n'.format(result['f_measure']))
+        with open(os.path.join('./out', '{}.csv'.format(config['name'])), mode='a') as output:
+            output.write('# F1 score: {0:f}\n'.format(result['f_measure']))
