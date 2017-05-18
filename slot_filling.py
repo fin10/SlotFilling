@@ -2,15 +2,11 @@ import tensorflow as tf
 
 # SF_MODEL_DIR = './model_sf'
 SF_MODEL_DIR = None
-SF_STEPS = 3000
 EMBEDDING_DIMENSION = 100
 CELL_SIZE = 100
 LEARNING_RATE = 0.001
 MAX_SEQUENCE_LENGTH = 50
-WORD_PADDING = 572
-LABEL_PADDING = 127
-ENTITY_PADDING = 141
-TAG_PADDING = 34
+PADDING = 999
 
 
 class SlotFilling:
@@ -44,10 +40,10 @@ class SlotFilling:
                     tag.append(tags[idx])
                     mask.append(1.0)
                 else:
-                    x.append(WORD_PADDING)
-                    y.append(LABEL_PADDING)
-                    entity.append(ENTITY_PADDING)
-                    tag.append(TAG_PADDING)
+                    x.append(PADDING)
+                    y.append(PADDING)
+                    entity.append(PADDING)
+                    tag.append(PADDING)
                     mask.append(0.0)
 
             inputs.append(x)
@@ -96,29 +92,30 @@ class SlotFilling:
         # embeddings
         inputs = embedding('word_embeddings', vocab_size, inputs)
 
-        def conv2d(kernel_size, stride, ips):
+        def conv2d(name, kernel_size, stride, ips):
             return tf.reshape(tf.contrib.layers.conv2d(
                 inputs=ips,
                 num_outputs=embedding_dimension,
                 kernel_size=kernel_size,
                 stride=stride,
-                padding='SAME'
+                padding='SAME',
+                scope=name
             ), [-1, MAX_SEQUENCE_LENGTH, embedding_dimension])
 
         if embedding_mode == 'ne':
             named_entities = embedding('entity_embeddings', entity_size, named_entities)
 
             if cnn:
-                inputs = conv2d(5, 1, inputs)
-                named_entities = conv2d(5, 1, named_entities)
+                inputs = conv2d('input', 5, 1, inputs)
+                named_entities = conv2d('named_entity', 5, 1, named_entities)
 
             inputs = tf.concat([inputs, named_entities], axis=2)
         elif embedding_mode == 'pos':
             pos = embedding('pos_embeddings', tag_size, pos)
 
             if cnn:
-                inputs = conv2d(5, 1, inputs)
-                pos = conv2d(7, 1, pos)
+                inputs = conv2d('input', 5, 1, inputs)
+                pos = conv2d('pos', 7, 1, pos)
 
             inputs = tf.concat([inputs, pos], axis=2)
         elif embedding_mode == 'ne_pos':
@@ -126,14 +123,14 @@ class SlotFilling:
             pos = embedding('pos_embeddings', tag_size, pos)
 
             if cnn:
-                inputs = conv2d(5, 1, inputs)
-                named_entities = conv2d(5, 1, named_entities)
-                pos = conv2d(7, 1, pos)
+                inputs = conv2d('input', 5, 1, inputs)
+                named_entities = conv2d('named_entity', 5, 1, named_entities)
+                pos = conv2d('pos', 7, 1, pos)
 
             inputs = tf.concat([inputs, named_entities, pos], axis=2)
         else:
             if cnn:
-                inputs = conv2d(5, 1, inputs)
+                inputs = conv2d('input', 5, 1, inputs)
 
         cell_fw = tf.contrib.rnn.GRUCell(cell_size)
         cell_bw = tf.contrib.rnn.GRUCell(cell_size)
@@ -236,24 +233,23 @@ class SlotFilling:
         )
 
     @classmethod
-    def run(cls, training_set, dev_set, test_set, num_slot, gpu_memory, random_seed, vocab_size, entity_size, tag_size,
-            drop_out, embedding_mode, cnn):
+    def run(cls, training_set, dev_set, test_set, params):
         classifier = tf.contrib.learn.Estimator(
             model_fn=cls.rnn_model_fn,
             model_dir=SF_MODEL_DIR,
             config=tf.contrib.learn.RunConfig(
-                gpu_memory_fraction=gpu_memory,
-                tf_random_seed=random_seed,
+                gpu_memory_fraction=params['gpu_memory'],
+                tf_random_seed=params['random_seed'],
                 save_checkpoints_secs=30,
             ),
             params={
-                'num_slot': num_slot + 1,
-                'drop_out': drop_out,
-                'vocab_size': vocab_size + 1,
-                'entity_size': entity_size + 1,
-                'tag_size': tag_size + 1,
-                'embedding_mode': embedding_mode,
-                'cnn': cnn
+                'num_slot': params['num_slot'],
+                'drop_out': params['drop_out'],
+                'vocab_size': params['vocab_size'],
+                'entity_size': params['entity_size'],
+                'tag_size': params['tag_size'],
+                'embedding_mode': params['embedding_mode'],
+                'cnn': params['cnn']
             },
         )
 
@@ -278,7 +274,6 @@ class SlotFilling:
         classifier.fit(
             input_fn=lambda: cls.input_fn(training_set),
             monitors=[monitor],
-            steps=SF_STEPS
         )
 
         ev = classifier.evaluate(
@@ -286,7 +281,12 @@ class SlotFilling:
             steps=1
         )
 
+        predictions = classifier.predict(
+            input_fn=lambda: cls.input_fn(test_set)
+        )
+
         return {
+            'predictions': predictions,
             'accuracy': ev['accuracy'],
             'f_measure': ev['f-measure'],
             'precision': ev['precision'],

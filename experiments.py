@@ -17,9 +17,7 @@ random.seed(RANDOM_SEED)
 config_plain = {
     'name': 'plain',
     'drop_out': 0.2,
-    'gpu_memory': 0.5,
-    'embedding_mode': None,
-    'cnn': False,
+    'gpu_memory': 0.2,
 }
 
 config_plain_ne = {
@@ -27,7 +25,6 @@ config_plain_ne = {
     'drop_out': 0.2,
     'gpu_memory': 0.5,
     'embedding_mode': 'ne',
-    'cnn': False,
 }
 
 config_plain_pos = {
@@ -35,7 +32,6 @@ config_plain_pos = {
     'drop_out': 0.2,
     'gpu_memory': 0.5,
     'embedding_mode': 'pos',
-    'cnn': False,
 }
 
 config_plain_ne_pos = {
@@ -43,14 +39,12 @@ config_plain_ne_pos = {
     'drop_out': 0.2,
     'gpu_memory': 0.5,
     'embedding_mode': 'ne_pos',
-    'cnn': False,
 }
 
 config_cnn = {
     'name': 'cnn',
     'drop_out': 0.2,
     'gpu_memory': 0.5,
-    'embedding_mode': None,
     'cnn': True,
 }
 
@@ -79,7 +73,6 @@ config_cnn_ne_pos = {
 }
 
 common = {
-    'pkl': './data/atis.pkl',
     'train': './data/atis_pos.pkl.train.json',
     'test': './data/atis_pos.pkl.test.json',
     'dict': './data/atis_pos.pkl.dict.json',
@@ -129,22 +122,24 @@ if __name__ == '__main__':
     print('# entity_size (%d)' % entity_size)
     print('# tag_size (%d)' % tag_size)
 
-    for config in [config_cnn_pos, config_cnn_ne_pos]:
+    for config in [config_plain]:
         start = datetime.datetime.now()
 
         result = SlotFilling.run(
             training_set=train,
             dev_set=dev,
             test_set=test,
-            num_slot=num_slot,
-            gpu_memory=config['gpu_memory'],
-            random_seed=RANDOM_SEED,
-            vocab_size=vocab_size,
-            entity_size=entity_size,
-            tag_size=tag_size,
-            drop_out=config['drop_out'],
-            embedding_mode=config['embedding_mode'],
-            cnn=config['cnn']
+            params={
+                'num_slot': num_slot,
+                'gpu_memory': 'gpu_memory' in config and config['gpu_memory'] or 0.2,
+                'random_seed': RANDOM_SEED,
+                'vocab_size': vocab_size,
+                'entity_size': entity_size,
+                'tag_size': tag_size,
+                'drop_out': 'drop_out' in config and config['drop_out'] or 0.5,
+                'embedding_mode': 'embedding_mode' in config and config['embedding_mode'] or None,
+                'cnn': 'cnn' in config and config['cnn'] or False
+            }
         )
 
         print('# Accuracy: {0:f}'.format(result['accuracy']))
